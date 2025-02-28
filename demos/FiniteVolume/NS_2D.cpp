@@ -95,8 +95,7 @@ auto compute_OS_flux_correction(xtensor_t& d_alpha, xtensor_t& nu, xtensor_c& c_
     return flux;
 }
 
-// One step scheme 
-
+// Compute Flux of Convection: (2*order-1)-th One Step scheme 
 template <class Field, std::size_t dir, std::size_t order>
 auto make_OS_scheme(double& dt)
 {
@@ -279,6 +278,60 @@ auto make_OS_scheme(double& dt)
         });
 
     return samurai::make_flux_based_scheme(lw);
+}
+
+// Compute Flux of Diffusion: 2nd order centered scheme
+template <class Field>
+auto make_nonlinear_diffusion()
+{
+    static constexpr std::size_t dim               = Field::dim;
+    static constexpr std::size_t field_size        = Field::size;
+    static constexpr std::size_t output_field_size = field_size;
+    static constexpr std::size_t stencil_size      = 2;
+
+    using cfg = samurai::FluxConfig<samurai::SchemeType::NonLinear, output_field_size, stencil_size, Field>;
+
+    samurai::FluxDefinition<cfg> flux;
+
+    samurai::static_for<0, dim>::apply( // for each positive Cartesian direction 'd'
+        [&](auto integral_constant_d)
+        {
+            static constexpr std::size_t d = integral_constant_d();
+
+            flux[d].cons_flux_function = [](auto& cells, const Field& u, cons Field_mu& mu)
+            {
+                auto& L = cells[0];
+                auto& R = cells[1];
+                auto dx = L.length;
+
+                auto mu_u     = (mu[L] + mu[R]) / 2;
+                auto grad_u = (u[L] - u[R]) / dx;
+
+                samurai::FluxValue<cfg> f = mu_u * grad_u; // (1)
+                return f;
+            };
+
+            flux[d].cons_jacobian_function = [](auto& cells, const Field& u)
+            {
+                auto& L = cells[0];
+                auto& R = cells[1];
+                auto dx = L.length;
+
+                samurai::StencilJacobian<cfg> jac;
+                auto& jac_L = jac[0];
+                auto& jac_R = jac[1];
+
+                auto mu_u     = (u[L] + u[R]) / 2;
+                auto grad_u = (u[L] - u[R]) / dx;
+
+                jac_L = grad_u / 2 + mu_u / dx; // derive (1) w.r.t. u[L]
+                jac_R = grad_u / 2 - mu_u / dx; // derive (1) w.r.t. u[R]
+
+                return jac;
+            };
+        });
+
+    return samurai::make_flux_based_scheme(flux);
 }
 
 //Save Field

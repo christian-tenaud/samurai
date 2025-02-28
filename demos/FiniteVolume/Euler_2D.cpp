@@ -332,8 +332,8 @@ int main(int argc, char* argv[])
     //--------------------//
 
     // Simulation parameters
-    double left_box  = -5;
-    double right_box = 5;
+    double left_box  = 0;
+    double right_box = 1;
 
     // Time integration
     double Tf  = 1.;
@@ -348,7 +348,7 @@ int main(int argc, char* argv[])
 
     // Output parameters
     fs::path path        = fs::current_path();
-    std::string filename = "convection_" + std::to_string(dim) + "D";
+    std::string filename = "Euler_" + std::to_string(dim) + "D";
     std::size_t nfiles   = 50;
     bool export_reconstruct = false;
 
@@ -377,15 +377,25 @@ int main(int argc, char* argv[])
     // Problem definition //
     //--------------------//
     const double pi    = std::acos(-1);
-    const double gamma = 1.4;
-    const double Mach  = 1.;
+    constexpr double gamma = 1.4;
+    constexpr double Mach  = 1.;
+
+    constexpr double rho_right = 0.125;
+    constexpr double P_right = 0.1;
+    constexpr double v_right = 0.;
+
+    constexpr double rho_left = 1.;
+    constexpr double P_left = 1.;
+    // double rho_left = rho_right * (gamma+1.)*Mach*Mach / ( (gamma-1.)*Mach*Mach + 2. );
+    // double P_left = P_right * ( 2.*gamma*Mach*Mach - (gamma-1.) ) / (gamma+1.);
 
     point_t box_corner1, box_corner2;
     box_corner1.fill(left_box);
     box_corner2.fill(right_box);
     Box box(box_corner1, box_corner2);
     std::array<bool, dim> periodic;
-    periodic.fill(true);
+    // periodic.fill(false);
+    periodic = {false, true};
     samurai::MRMesh<Config> mesh{box, min_level, max_level, periodic};
 
     auto u    = samurai::make_field<field_size>("u", mesh);
@@ -393,18 +403,55 @@ int main(int argc, char* argv[])
     auto u1   = samurai::make_field<field_size>("u1", mesh);
     auto u2   = samurai::make_field<field_size>("u2", mesh);
 
-    // samurai::make_bc<samurai::Neumann<nordre>>(u);
-    // samurai::make_bc<samurai::Neumann<nordre>>(unp1);
-    // samurai::make_bc<samurai::Neumann<nordre>>(u1);
-    // samurai::make_bc<samurai::Neumann<nordre>>(u2);
+    ////////////////////////////////////
+    // Boundary condition definitions //
+    ////////////////////////////////////
+    samurai::DirectionVector<dim> left   = {-1, 0};
+    samurai::DirectionVector<dim> right  = {1, 0};
+    samurai::DirectionVector<dim> bottom = {0, -1};
+    samurai::DirectionVector<dim> top    = {0, 1};
+
+    // samurai::make_bc<samurai::Neumann<1>>(u);
+    // samurai::make_bc<samurai::Neumann<1>>(unp1);
+    // samurai::make_bc<samurai::Neumann<1>>(u1);
+    // samurai::make_bc<samurai::Neumann<1>>(u2);
+
+    constexpr double e_left = P_left/(gamma-1.);
+    constexpr double e_right = P_right/(gamma-1.);
+
+    // samurai::make_bc<samurai::Dirichlet<2>>(u, rho_left, 0., 0., e_left) -> on(left);
+    // samurai::make_bc<samurai::Dirichlet<2>>(u, rho_right, 0., 0., e_right) -> on(right);
+
+    samurai::make_bc<samurai::Symmetry<1>>(u, 1., -1., 1., 1.) -> on(left);
+    samurai::make_bc<samurai::Symmetry<1>>(u, 1., -1., 1., 1.) -> on(right);
+
+    u1.copy_bc_from(u);
+    u2.copy_bc_from(u);
+    unp1.copy_bc_from(u);
+
+    // if constexpr (field_size == 3)
+    // {
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u, 1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(unp1, 1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u1, 1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u2, 1, -1, 1);
+    // }
+    // else if constexpr (field_size == 4)
+    // {
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u, 1, -1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(unp1, 1, -1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u1, 1, -1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u2, 1, -1, -1, 1);
+    // }
+    // else if constexpr (field_size == 5)
+    // {
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u, 1, -1, -1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(unp1, 1, -1, -1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u1, 1, -1, -1, -1, 1);
+    //     samurai::make_bc<samurai::Symmetry<norder>>(u2, 1, -1, -1, -1, 1);
+    // }
 
     // Initial solution
-    double rho_right = 1.;
-    double P_right = 1.;
-    double v_right = 0.;
-
-    double rho_left = rho_right * (gamma+1.)*Mach*Mach / ( (gamma-1.)*Mach*Mach + 2. );
-    double P_left = P_right * ( 2.*gamma*Mach*Mach - (gamma-1.) ) / (gamma+1.);
     
     std::cout << " Box = " << left_box << " " << right_box << std::endl;
 
@@ -423,54 +470,52 @@ int main(int argc, char* argv[])
                                 }
                                 
                                 // Balsara & Shu Vortex
-                                double delta_T = -(gamma-1)*ampli*ampli*std::exp(1-dist2)/(8.*gamma*pi*pi);  
-                                double t_loc   = 1. + delta_T*gamma*Mach*Mach;
+                                // double delta_T = -(gamma-1)*ampli*ampli*std::exp(1-dist2)/(8.*gamma*pi*pi);  
+                                // double t_loc   = 1. + delta_T*gamma*Mach*Mach;
 
-                                double u_theta = 0.5*ampli*std::exp(0.5*(1-dist2)) / pi;
+                                // double u_theta = 0.5*ampli*std::exp(0.5*(1-dist2)) / pi;
  
-                                u[cell][0] = std::pow(t_loc, 1./(gamma-1.));
-                                u[cell][1] = u[cell][0] * (1. - u_theta*cell.center(1));
-                                u[cell][2] = u[cell][0] * (1. + u_theta*cell.center(0));
-                                // u[cell][1] = - u[cell][0] * u_theta*cell.center(1);
-                                // u[cell][2] =   u[cell][0] * u_theta*cell.center(0);
+                                // u[cell][0] = std::pow(t_loc, 1./(gamma-1.));
+                                // u[cell][1] = u[cell][0] * (1. - u_theta*cell.center(1));
+                                // u[cell][2] = u[cell][0] * (1. + u_theta*cell.center(0));
                                 
-                                double rho_ec = 0.;
-                                for (std::size_t d = 0; d < dim; ++d)
-                                {
-                                    rho_ec += u[cell][d+1]*u[cell][d+1];
-                                }
-                                rho_ec = 0.5*rho_ec/u[cell][0];
+                                // double rho_ec = 0.;
+                                // for (std::size_t d = 0; d < dim; ++d)
+                                // {
+                                //     rho_ec += u[cell][d+1]*u[cell][d+1];
+                                // }
+                                // rho_ec = 0.5*rho_ec/u[cell][0];
 
-                                u[cell][3] = u[cell][0] * t_loc / (gamma*(gamma-1.)*Mach*Mach) + rho_ec;
+                                // u[cell][3] = u[cell][0] * t_loc / (gamma*(gamma-1.)*Mach*Mach) + rho_ec;
 
                                 // Rankine-Hugoniot jump
-                                // if( cell.center(0) <= (right_box+left_box)*.5 )
-                                // {
-                                //     u[cell][0] = rho_left;
-                                //     u[cell][1] = rho_right * v_right;
-                                //     u[cell][2] = 0.;
-                                //     double rho_ec = 0.;
-                                //     for ( std::size_t d = 1; d < dim+1; ++d)
-                                //     {
-                                //         rho_ec += u[cell][d]*u[cell][d];
-                                //     }
-                                //     rho_ec = 0.5*rho_ec/u[cell][0];
-                                //     u[cell][field_size-1] = P_left / (gamma*(gamma-1.)*Mach*Mach) + rho_ec;   
+                                if( cell.center(0) <= (right_box+left_box)*.5 )
+                                {
+                                    u[cell][0] = rho_left;
+                                    u[cell][1] = rho_right * v_right;
+                                    u[cell][2] = 0.;
+                                    double rho_ec = 0.;
+                                    for ( std::size_t d = 1; d < dim+1; ++d)
+                                    {
+                                        rho_ec += u[cell][d]*u[cell][d];
+                                    }
+                                    rho_ec = 0.5*rho_ec/u[cell][0];
+                                    u[cell][field_size-1] = P_left / (gamma*(gamma-1.)*Mach*Mach) + rho_ec;   
                                     
-                                // }
-                                // else
-                                // {
-                                //     u[cell][0] = rho_right;
-                                //     u[cell][1] = rho_right * v_right;
-                                //     u[cell][2] = 0.;
-                                //     double rho_ec = 0.;
-                                //     for ( std::size_t d = 0; d < dim; ++d)
-                                //     {
-                                //         rho_ec += u[cell][d+1]*u[cell][d+1];
-                                //     }
-                                //     rho_ec = 0.5*rho_ec/u[cell][0];
-                                //     u[cell][field_size-1] = P_right / (gamma*(gamma-1.)*Mach*Mach) + rho_ec;    
-                                // }
+                                }
+                                else
+                                {
+                                    u[cell][0] = rho_right;
+                                    u[cell][1] = rho_right * v_right;
+                                    u[cell][2] = 0.;
+                                    double rho_ec = 0.;
+                                    for ( std::size_t d = 0; d < dim; ++d)
+                                    {
+                                        rho_ec += u[cell][d+1]*u[cell][d+1];
+                                    }
+                                    rho_ec = 0.5*rho_ec/u[cell][0];
+                                    u[cell][field_size-1] = P_right / (gamma*(gamma-1.)*Mach*Mach) + rho_ec;    
+                                }
 
                             });
 
@@ -498,7 +543,7 @@ int main(int argc, char* argv[])
     {
         samurai::update_ghost_mr(u);
         auto u_recons = samurai::reconstruction(u);
-        samurai::save(path, fmt::format("convection_2D_recons_ite_{}", nsave), u_recons.mesh(), u_recons);
+        samurai::save(path, fmt::format("Euler_recons_ite_{}", nsave), u_recons.mesh(), u_recons);
     }
     nsave++;
 

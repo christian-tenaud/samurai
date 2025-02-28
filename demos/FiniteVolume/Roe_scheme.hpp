@@ -4,6 +4,7 @@
 // Routines to compute Euler system of equations
 
 //////////
+//Compute Pressure
 template <class xtensor_u, std::size_t dim, std::size_t field_size>
 auto compute_Pressure(xtensor_u& uj, const double& gamma) 
 {
@@ -20,6 +21,7 @@ auto compute_Pressure(xtensor_u& uj, const double& gamma)
     return PsgM2;
 }
 
+//Compute Speed of Sound
 template <class xtensor_u, std::size_t dim, std::size_t field_size>
 auto compute_SoundSpeed(xtensor_u& uj, const double& gamma) 
 {
@@ -36,6 +38,7 @@ auto compute_SoundSpeed(xtensor_u& uj, const double& gamma)
     return SoundSpeed;
 }
 
+//Compute Enthalpy
 template <class xtensor_u, std::size_t dim, std::size_t field_size>
 auto compute_Enthalpy(xtensor_u& uj, const double& gamma)
 {
@@ -51,6 +54,7 @@ auto compute_Enthalpy(xtensor_u& uj, const double& gamma)
     return Hj;
 }
 
+//Compute the Roe mean
 template <class xtensor_u, std::size_t dim, std::size_t field_size>
 auto compute_Roemean(xtensor_u& uj, xtensor_u& ujp1, const double& gamma)
 {
@@ -87,6 +91,7 @@ auto compute_Roemean(xtensor_u& uj, xtensor_u& ujp1, const double& gamma)
     return mean_Roe;
 }
 
+//Compute Eigenvalues of the Euler flux
 template <class xtensor_u, std::size_t dim, std::size_t field_size>
 auto compute_EigenValues(xtensor_u& ujp12, const int& dir, const double& gamma)
 {
@@ -106,6 +111,7 @@ auto compute_EigenValues(xtensor_u& ujp12, const int& dir, const double& gamma)
     return EV;
 }
 
+//Compute Left Eigenvectors of the Euler flux
 template <class xtensor_u, std::size_t dim, std::size_t field_size>
 auto compute_LeftEigenVectors(xtensor_u& ujp12, const std::size_t& dir, const double& gamma)
 {
@@ -179,6 +185,7 @@ auto compute_LeftEigenVectors(xtensor_u& ujp12, const std::size_t& dir, const do
     return L_jp12;
 }
 
+//Compute Right Eigenvectors of the Euler flux
 template <class xtensor_u, std::size_t dim, std::size_t field_size>
 auto compute_RightEigenVectors(xtensor_u& ujp12, const std::size_t& dir, const double& gamma)
 {
