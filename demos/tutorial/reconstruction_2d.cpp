@@ -1,6 +1,5 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -24,6 +23,8 @@ enum class Case : int
     tanh
 };
 
+using namespace samurai::math;
+
 template <class Mesh>
 auto init(Mesh& mesh, Case& c)
 {
@@ -35,20 +36,20 @@ auto init(Mesh& mesh, Case& c)
                                [&](std::size_t level, const auto& i, const auto& index)
                                {
                                    auto j          = index[0];
-                                   const double dx = samurai::cell_length(level);
-                                   auto x          = dx * xt::arange(i.start, i.end) + 0.5 * dx;
-                                   auto y          = j * dx + 0.5 * dx;
+                                   const double dx = mesh.cell_length(level);
+                                   auto x          = mesh.origin_point()[0] + dx * arange<double>(i.start, i.end) + 0.5 * dx;
+                                   auto y          = mesh.origin_point()[1] + j * dx + 0.5 * dx;
 
                                    switch (c)
                                    {
                                        case Case::abs:
-                                           u(level, i, j) = xt::abs(x) + std::abs(y);
+                                           u(level, i, j) = abs(x) + std::abs(y);
                                            break;
                                        case Case::exp:
-                                           u(level, i, j) = xt::exp(-100 * (x * x + y * y));
+                                           u(level, i, j) = exp(-100 * (x * x + y * y));
                                            break;
                                        case Case::tanh:
-                                           u(level, i, j) = xt::tanh(50 * (xt::abs(x) + std::abs(y))) - 1;
+                                           u(level, i, j) = tanh(50 * (abs(x) + std::abs(y))) - 1;
                                            break;
                                    }
                                });
@@ -83,7 +84,7 @@ auto init(Mesh& mesh, Case& c)
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("2d reconstruction of an adapted solution using multiresolution", argc, argv);
 
     constexpr size_t dim                        = 2;
     constexpr std::size_t max_stencil_width_    = 2;
@@ -109,7 +110,6 @@ int main(int argc, char* argv[])
     fs::path path        = fs::current_path();
     std::string filename = "reconstruction_2d";
 
-    CLI::App app{"2d reconstruction of an adapted solution using multiresolution"};
     app.add_option("--case", test_case, "Test case")->capture_default_str()->transform(CLI::CheckedTransformer(map, CLI::ignore_case));
     app.add_option("--min-level", min_level, "Minimum level of the multiresolution")->capture_default_str()->group("Multiresolution");
     app.add_option("--max-level", max_level, "Maximum level of the multiresolution")->capture_default_str()->group("Multiresolution");
@@ -122,9 +122,9 @@ int main(int argc, char* argv[])
                    "adapt the mesh")
         ->capture_default_str()
         ->group("Multiresolution");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    CLI11_PARSE(app, argc, argv);
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    SAMURAI_PARSE(argc, argv);
 
     if (!fs::exists(path))
     {
@@ -138,8 +138,8 @@ int main(int argc, char* argv[])
     using UMesh   = samurai::UniformMesh<UConfig>;
 
     const samurai::Box<double, dim> box({-1, -1}, {1, 1});
-    MRMesh mrmesh{box, min_level, max_level};
-    UMesh umesh{box, max_level};
+    MRMesh mrmesh{box, min_level, max_level, 0, 1};
+    UMesh umesh{box, max_level, 0, 1};
     auto u       = init(mrmesh, test_case);
     auto u_exact = init(umesh, test_case);
 
@@ -164,7 +164,7 @@ int main(int argc, char* argv[])
                                [&](std::size_t level, const auto& i, const auto& index)
                                {
                                    auto j             = index[0];
-                                   error(level, i, j) = xt::abs(u_reconstruct(level, i, j) - u_exact(level, i, j));
+                                   error(level, i, j) = abs(u_reconstruct(level, i, j) - u_exact(level, i, j));
                                });
     samurai::save(path, fmt::format("uniform_{}", filename), u_reconstruct.mesh(), u_reconstruct, error);
 

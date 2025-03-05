@@ -1,5 +1,88 @@
 # Changelog
 
+## [0.21.1](https://github.com/hpc-maths/samurai/compare/v0.21.0...v0.21.1) (2025-02-06)
+
+
+### Bug Fixes
+
+* add make_field_function ([#266](https://github.com/hpc-maths/samurai/issues/266)) ([057bfbe](https://github.com/hpc-maths/samurai/commit/057bfbecba69d112318dea522d395c87967a9432))
+
+## [0.21.0](https://github.com/hpc-maths/samurai/compare/v0.20.0...v0.21.0) (2025-01-26)
+
+
+### Features
+
+* find cell from cartesian coordinates ([#259](https://github.com/hpc-maths/samurai/issues/259)) ([2432537](https://github.com/hpc-maths/samurai/commit/24325371dae7669931bde3282df614fdd6ce6236))
+
+
+### Bug Fixes
+
+* cmake samuraiConfig bug ([#255](https://github.com/hpc-maths/samurai/issues/255)) ([265ee64](https://github.com/hpc-maths/samurai/commit/265ee6431767ae38db349704c78a44209851be61))
+* default value for SOA in Array ([#258](https://github.com/hpc-maths/samurai/issues/258)) ([4bab319](https://github.com/hpc-maths/samurai/commit/4bab319b5802cc484f303ee5140d3ef196361ac3))
+* Fix type issue in Field.operator() ([#260](https://github.com/hpc-maths/samurai/issues/260)) ([df0115f](https://github.com/hpc-maths/samurai/commit/df0115feb475acbbb86163dceddd4d6ff310cc76))
+
+## [0.20.0](https://github.com/hpc-maths/samurai/compare/v0.19.0...v0.20.0) (2025-01-10)
+
+
+### Features
+
+* new container types ([#222](https://github.com/hpc-maths/samurai/issues/222)) ([85f12b6](https://github.com/hpc-maths/samurai/commit/85f12b6c156827dbdef57793510bf96091163790))
+
+## [0.19.0](https://github.com/hpc-maths/samurai/compare/v0.18.0...v0.19.0) (2024-12-17)
+
+
+### Features
+
+* fieldsplit PC for monolithic matrix ([#237](https://github.com/hpc-maths/samurai/issues/237)) ([b4bcdb7](https://github.com/hpc-maths/samurai/commit/b4bcdb7fffc4f652344368317670ccc37fe34684))
+* Timers ([#235](https://github.com/hpc-maths/samurai/issues/235)) ([7d39d12](https://github.com/hpc-maths/samurai/commit/7d39d126e4c6cc6abef86683fd68cbb3cccc08aa))
+
+
+### Bug Fixes
+
+* enlarge ([#238](https://github.com/hpc-maths/samurai/issues/238)) ([8cfbea9](https://github.com/hpc-maths/samurai/commit/8cfbea9fa1b4a4c58dfbb420bcfb9b8ace4274e8))
+* fix BC ([#248](https://github.com/hpc-maths/samurai/issues/248)) ([9758202](https://github.com/hpc-maths/samurai/commit/9758202baade42020da0e944ce127f6b1168147d))
+* Fix prediction order 0 ([#246](https://github.com/hpc-maths/samurai/issues/246)) ([f37575d](https://github.com/hpc-maths/samurai/commit/f37575d48fb33ae070c88f59bb4b7a5a8b2c5d0a))
+* projection cells for periodic case ([#240](https://github.com/hpc-maths/samurai/issues/240)) ([6c03245](https://github.com/hpc-maths/samurai/commit/6c03245c7734df3bd4e51e24c02d8e3c5249c8a0))
+* the tagged cells with the graduation ([#247](https://github.com/hpc-maths/samurai/issues/247)) ([3156cd2](https://github.com/hpc-maths/samurai/commit/3156cd23fe9438b4efc187d337c5022a08b58ec7))
+
+
+### Performance Improvements
+
+* Improve nb cells ([#241](https://github.com/hpc-maths/samurai/issues/241)) ([6cd24b5](https://github.com/hpc-maths/samurai/commit/6cd24b5d988f01885dfc43fadec8505511163a07))
+* remove apply interval index ([#242](https://github.com/hpc-maths/samurai/issues/242)) ([c3b3f73](https://github.com/hpc-maths/samurai/commit/c3b3f73ecd349c52bea054114735231f530aec6e))
+* remove hardcoded access modes in get_interval ([#243](https://github.com/hpc-maths/samurai/issues/243)) ([8fdf11e](https://github.com/hpc-maths/samurai/commit/8fdf11e0bf279fc6de105d6e44669675d5211274))
+* replace views/ranges with loops ([#244](https://github.com/hpc-maths/samurai/issues/244)) ([15849e2](https://github.com/hpc-maths/samurai/commit/15849e2fa52de077cad6ae1f4e7d59e7378bdf05))
+
+## [0.18.0](https://github.com/hpc-maths/samurai/compare/v0.17.0...v0.18.0) (2024-11-20)
+
+
+### Features
+
+* Scaling ([#229](https://github.com/hpc-maths/samurai/issues/229)) ([faf792a](https://github.com/hpc-maths/samurai/commit/faf792a7b9111263e6d303fb7996b630fc5e3478))
+
+
+### Bug Fixes
+
+* BC no longer required to assemble the matrix of a local scheme ([#231](https://github.com/hpc-maths/samurai/issues/231)) ([2080c00](https://github.com/hpc-maths/samurai/commit/2080c00f4364ec40beb7d643f2674c311e23482a))
+* fill corners on uniform meshes ([#234](https://github.com/hpc-maths/samurai/issues/234)) ([59d81b1](https://github.com/hpc-maths/samurai/commit/59d81b15a94e2b0667b71c85c187ca830885a558))
+* fix block sizes for nested matrices ([#233](https://github.com/hpc-maths/samurai/issues/233)) ([142be77](https://github.com/hpc-maths/samurai/commit/142be77364e3567f4b4e419d71678465c6d0e66d))
+* fmt usage with version 11 ([#226](https://github.com/hpc-maths/samurai/issues/226)) ([b3902b0](https://github.com/hpc-maths/samurai/commit/b3902b08b809183ccc57c3bb0b57bb61862c5d39))
+* The matrix size is set upon calling `assembly.set_unknowns(...)`. ([#227](https://github.com/hpc-maths/samurai/issues/227)) ([5d324de](https://github.com/hpc-maths/samurai/commit/5d324de21cda3ec4b847c9e71b9950d6d5feee0c))
+
+
+### Performance Improvements
+
+* `update_ghost_mr()` performance improved on uniform meshes ([#230](https://github.com/hpc-maths/samurai/issues/230)) ([2596ba7](https://github.com/hpc-maths/samurai/commit/2596ba7421d62b76af13ce60f4bc08ae4556bac0))
+
+## [0.17.0](https://github.com/hpc-maths/samurai/compare/v0.16.0...v0.17.0) (2024-09-10)
+
+
+### Features
+
+* Boundary region with coordinates ([#221](https://github.com/hpc-maths/samurai/issues/221)) ([5bcb38e](https://github.com/hpc-maths/samurai/commit/5bcb38e49dac15199aab49fd291fe59dc8e44785))
+* export samurai CMake options ([#224](https://github.com/hpc-maths/samurai/issues/224)) ([df0ded2](https://github.com/hpc-maths/samurai/commit/df0ded2e1bb65a02a9e3a88de0394f5617de4d35))
+* Flux operators applicable by direction ([#223](https://github.com/hpc-maths/samurai/issues/223)) ([91a7082](https://github.com/hpc-maths/samurai/commit/91a70825ae0b5c4b34802e8fc4faab141075f31d))
+
 ## [0.16.0](https://github.com/hpc-maths/samurai/compare/v0.15.0...v0.16.0) (2024-06-18)
 
 

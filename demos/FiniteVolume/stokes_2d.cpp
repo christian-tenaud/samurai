@@ -1,13 +1,11 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <iostream>
 #include <samurai/hdf5.hpp>
 #include <samurai/mr/adapt.hpp>
 #include <samurai/mr/mesh.hpp>
 #include <samurai/petsc.hpp>
-#include <samurai/reconstruction.hpp>
 #include <samurai/samurai.hpp>
 
 static constexpr double pi = M_PI;
@@ -98,13 +96,17 @@ void configure_saddle_point_solver(Solver& block_solver)
     KSP ksp = block_solver.Ksp();
     PC pc;
     KSPGetPC(ksp, &pc);
-    PCSetType(pc, PCFIELDSPLIT);                 // (equiv. '-pc_type fieldsplit')
+
+    block_solver.assemble_matrix(); // if nested matrix, must be called before calling set_pc_fieldsplit().
+
+    block_solver.set_pc_fieldsplit(pc);
     PCFieldSplitSetType(pc, PC_COMPOSITE_SCHUR); // Schur complement preconditioner (equiv. '-pc_fieldsplit_type schur')
     PCFieldSplitSetSchurPre(pc, PC_FIELDSPLIT_SCHUR_PRE_SELFP, PETSC_NULLPTR); // (equiv. '-pc_fieldsplit_schur_precondition selfp')
     PCFieldSplitSetSchurFactType(pc, PC_FIELDSPLIT_SCHUR_FACT_FULL);           // (equiv. '-pc_fieldsplit_schur_fact_type full')
 
     // Configure the sub-solvers
-    block_solver.setup(); // must be called before using PCFieldSplitSchurGetSubKSP(), because the matrices are needed.
+    block_solver.setup(); // KSPSetUp() or PCSetUp() must be called before calling PCFieldSplitSchurGetSubKSP(), because the matrices are
+                          // needed.
     KSP* sub_ksp;
     PCFieldSplitSchurGetSubKSP(pc, nullptr, &sub_ksp);
     KSP A_ksp     = sub_ksp[0];
@@ -142,13 +144,13 @@ void configure_solver(Solver& solver)
     }
     else
     {
-        configure_saddle_point_solver(solver);
+        configure_saddle_point_solver(solver); // works also for monolithic
     }
 }
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("Stokes problem", argc, argv);
 
     constexpr std::size_t dim        = 2;
     using Config                     = samurai::MRConfig<dim, 2>;
@@ -175,7 +177,6 @@ int main(int argc, char* argv[])
     fs::path path        = fs::current_path();
     std::string filename = "";
 
-    CLI::App app{"Stokes problem"};
     app.add_option("--test-case", test_case, "Test case (s = stationary, ns = non-stationary)")
         ->capture_default_str()
         ->group("Simulation parameters");
@@ -189,11 +190,11 @@ int main(int argc, char* argv[])
     app.add_option("--mr-reg", mr_regularity, "The regularity criteria used by the multiresolution to adapt the mesh")
         ->capture_default_str()
         ->group("Multiresolution");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Ouput");
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Output");
     app.allow_extras();
-    CLI11_PARSE(app, argc, argv);
+    SAMURAI_PARSE(argc, argv);
 
     if (!fs::exists(path))
     {
@@ -244,7 +245,7 @@ int main(int argc, char* argv[])
                                                     const auto& y = coord[1];
                                                     double v_x    = 1 / (pi * pi) * sin(pi * (x + y));
                                                     double v_y    = -v_x;
-                                                    return xt::xtensor_fixed<double, xt::xshape<dim>>{v_x, v_y};
+                                                    return samurai::Array<double, dim, is_soa>{v_x, v_y};
                                                 });
 
         samurai::make_bc<samurai::Neumann<1>>(pressure,
@@ -278,7 +279,7 @@ int main(int argc, char* argv[])
                                                       const auto& y = coord[1];
                                                       double f_x    = 2 * sin(pi * (x + y)) + (1 / pi) * cos(pi * (x + y));
                                                       double f_y    = -2 * sin(pi * (x + y)) + (1 / pi) * cos(pi * (x + y));
-                                                      return xt::xtensor_fixed<double, xt::xshape<dim>>{f_x, f_y};
+                                                      return samurai::Array<double, dim, is_soa>{f_x, f_y};
                                                   });
         auto zero = samurai::make_field<1, is_soa>("zero", mesh);
         zero.fill(0);
@@ -301,7 +302,7 @@ int main(int argc, char* argv[])
                                     const auto& y = coord[1];
                                     auto v_x      = 1 / (pi * pi) * sin(pi * (x + y));
                                     auto v_y      = -v_x;
-                                    return xt::xtensor_fixed<double, xt::xshape<dim>>{v_x, v_y};
+                                    return samurai::Array<double, dim, is_soa>{v_x, v_y};
                                 });
         std::cout.precision(2);
         std::cout << "L2-error on the velocity: " << std::scientific << error << std::endl;
@@ -320,7 +321,7 @@ int main(int argc, char* argv[])
                                                                    const auto& y = coord[1];
                                                                    auto v_x      = 1 / (pi * pi) * sin(pi * (x + y));
                                                                    auto v_y      = -v_x;
-                                                                   return xt::xtensor_fixed<double, xt::xshape<dim>>{v_x, v_y};
+                                                                   return samurai::Array<double, dim, is_soa>{v_x, v_y};
                                                                });
         samurai::save(path, "exact_velocity", mesh, exact_velocity);
 
@@ -370,7 +371,7 @@ int main(int argc, char* argv[])
                        - pi * sin(t) * sin(t) * sin(pi * x) * sin(pi * y);
             double f_y = -(cos(t) + 8 * diff_coeff * pi * pi * sin(t)) * cos(2 * pi * x) * sin(2 * pi * y)
                        + pi * sin(t) * sin(t) * cos(pi * x) * cos(pi * y);
-            return xt::xtensor_fixed<double, xt::xshape<dim>>{f_x, f_y};
+            return samurai::Array<double, dim, is_soa>{f_x, f_y};
         };
 
         // Exact solution
@@ -380,7 +381,7 @@ int main(int argc, char* argv[])
             const auto& y = coord[1];
             double v_x    = std::sin(t) * std::sin(2 * pi * x) * std::cos(2 * pi * y);
             double v_y    = -std::sin(t) * std::cos(2 * pi * x) * std::sin(2 * pi * y);
-            return xt::xtensor_fixed<double, xt::xshape<dim>>{v_x, v_y};
+            return samurai::Array<double, dim, is_soa>{v_x, v_y};
         };
         auto exact_normal_grad_pressure = [&](double t, const auto& coord)
         {

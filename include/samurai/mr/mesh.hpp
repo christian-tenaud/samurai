@@ -74,8 +74,17 @@ namespace samurai
         MRMesh() = default;
         MRMesh(const cl_type& cl, const self_type& ref_mesh);
         MRMesh(const cl_type& cl, std::size_t min_level, std::size_t max_level);
-        MRMesh(const samurai::Box<double, dim>& b, std::size_t min_level, std::size_t max_level);
-        MRMesh(const samurai::Box<double, dim>& b, std::size_t min_level, std::size_t max_level, const std::array<bool, dim>& periodic);
+        MRMesh(const samurai::Box<double, dim>& b,
+               std::size_t min_level,
+               std::size_t max_level,
+               double approx_box_tol = lca_type::default_approx_box_tol,
+               double scaling_factor = 0);
+        MRMesh(const samurai::Box<double, dim>& b,
+               std::size_t min_level,
+               std::size_t max_level,
+               const std::array<bool, dim>& periodic,
+               double approx_box_tol = lca_type::default_approx_box_tol,
+               double scaling_factor = 0);
 
         void update_sub_mesh_impl();
 
@@ -96,8 +105,12 @@ namespace samurai
     }
 
     template <class Config>
-    inline MRMesh<Config>::MRMesh(const samurai::Box<double, dim>& b, std::size_t min_level, std::size_t max_level)
-        : base_type(b, max_level, min_level, max_level)
+    inline MRMesh<Config>::MRMesh(const samurai::Box<double, dim>& b,
+                                  std::size_t min_level,
+                                  std::size_t max_level,
+                                  double approx_box_tol,
+                                  double scaling_factor_)
+        : base_type(b, max_level, min_level, max_level, approx_box_tol, scaling_factor_)
     {
     }
 
@@ -105,8 +118,10 @@ namespace samurai
     inline MRMesh<Config>::MRMesh(const samurai::Box<double, dim>& b,
                                   std::size_t min_level,
                                   std::size_t max_level,
-                                  const std::array<bool, dim>& periodic)
-        : base_type(b, max_level, min_level, max_level, periodic)
+                                  const std::array<bool, dim>& periodic,
+                                  double approx_box_tol,
+                                  double scaling_factor_)
+        : base_type(b, max_level, min_level, max_level, periodic, approx_box_tol, scaling_factor_)
     {
     }
 
@@ -227,28 +242,6 @@ namespace samurai
             }
             this->cells()[mesh_id_t::all_cells] = {cell_list, false};
 
-            for (std::size_t level = 0; level < max_level; ++level)
-            {
-                lcl_type& lcl = cell_list[level + 1];
-                lcl_type lcl_proj{level};
-                auto expr = intersection(this->cells()[mesh_id_t::all_cells][level], this->get_union()[level]);
-
-                expr(
-                    [&](const auto& interval, const auto& index_yz)
-                    {
-                        static_nested_loop<dim - 1, 0, 2>(
-                            [&](auto s)
-                            {
-                                lcl[(index_yz << 1) + s].add_interval(interval << 1);
-                            });
-                        lcl_proj[index_yz].add_interval(interval);
-                    });
-                this->cells()[mesh_id_t::all_cells][level + 1] = lcl;
-                this->cells()[mesh_id_t::proj_cells][level]    = lcl_proj;
-            }
-
-            this->update_mesh_neighbour();
-
             // add ghosts for periodicity
             xt::xtensor_fixed<typename interval_t::value_t, xt::xshape<dim>> stencil;
             xt::xtensor_fixed<typename interval_t::value_t, xt::xshape<dim>> min_corner;
@@ -312,6 +305,27 @@ namespace samurai
                     }
                 }
             }
+
+            for (std::size_t level = 0; level < max_level; ++level)
+            {
+                lcl_type& lcl = cell_list[level + 1];
+                lcl_type lcl_proj{level};
+                auto expr = intersection(this->cells()[mesh_id_t::all_cells][level], this->get_union()[level]);
+
+                expr(
+                    [&](const auto& interval, const auto& index_yz)
+                    {
+                        static_nested_loop<dim - 1, 0, 2>(
+                            [&](auto s)
+                            {
+                                lcl[(index_yz << 1) + s].add_interval(interval << 1);
+                            });
+                        lcl_proj[index_yz].add_interval(interval);
+                    });
+                this->cells()[mesh_id_t::all_cells][level + 1] = lcl;
+                this->cells()[mesh_id_t::proj_cells][level]    = lcl_proj;
+            }
+            this->update_mesh_neighbour();
         }
         else
         {
@@ -331,8 +345,8 @@ namespace samurai
         std::size_t iout         = 0;
         for (coord_index_t i = interval.start; i < interval.end; i += interval.step)
         {
-            auto row = find(lca, {i, index...});
-            if (row == -1)
+            auto offset = find(lca, {i, index...});
+            if (offset == -1)
             {
                 out[iout++] = false;
             }
@@ -350,7 +364,7 @@ struct fmt::formatter<samurai::MRMeshId> : formatter<string_view>
 {
     // parse is inherited from formatter<string_view>.
     template <typename FormatContext>
-    auto format(samurai::MRMeshId c, FormatContext& ctx)
+    auto format(samurai::MRMeshId c, FormatContext& ctx) const
     {
         string_view name = "unknown";
         switch (c)

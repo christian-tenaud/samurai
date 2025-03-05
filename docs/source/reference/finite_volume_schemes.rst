@@ -312,16 +312,16 @@ Each :code:`c[i]` is a matrix of size :code:`output_field_size x input_field_siz
 where :code:`output_field_size` is set in :code:`cfg`,
 and :code:`input_field_size` corresponds to the size of the field type set in :code:`cfg` as :code:`input_field_type`.
 The matrix type is in fact an :code:`xtensor` object.
-You can then, amongs other things, access the :math:`k`-th row of :code:`c[0]` via :code:`xt::row(c[0], k)`,
+You can then, among other things, access the :math:`k`-th row of :code:`c[0]` via :code:`xt::row(c[0], k)`,
 its :math:`l`-th column via :code:`xt::col(c[0], l)`, or its coefficient at indices :math:`(k, l)` via :code:`c[0](k, l)`.
 
 .. note::
     When both :code:`output_field_size` and :code:`input_field_size` equal 1,
-    the matrix type employed to store the coefficents reduces to a scalar type (typically :code:`double`).
+    the matrix type employed to store the coefficients reduces to a scalar type (typically :code:`double`).
     In particular, no accessor or :code:`xtensor` function is available.
     To write an :math:`n`-dimensional program, a separate code for the special case where the matrix reduces to a scalar is usually necessary.
 
-As the operator is declared homogenous over the mesh, the coefficients do not depend on specific cell values.
+As the operator is declared homogeneous over the mesh, the coefficients do not depend on specific cell values.
 They can, however, depend on the mesh size :math:`h`, making :math:`h` the only parameter of the flux function.
 The coefficients can then be computed only once per mesh level, and re-used for all interfaces.
 If other (constant!) parameters are needed, they can be captured by the lambda function.
@@ -457,7 +457,7 @@ The implementation of the vector laplacian operator then writes
 Compared to the scalar laplacian code:
 
 - in the configuration, the :code:`output_field_size` now equals the :code:`field_size`,
-- in the flux fonction, the coefficients for each cell of the stencil are now matrices.
+- in the flux function, the coefficients for each cell of the stencil are now matrices.
   Specifically, they are diagonal matrices with the same coefficients as in the scalar laplacian.
 
 When :code:`field_size = 1`, the matrix type actually reduces to a scalar type, thus forbidding instructions such as :code:`c[L](i, i)`.
@@ -920,11 +920,12 @@ The associated code yields
                 return f_v;
             };
 
-            f_h[d].cons_flux_function = [f](auto& cells, const Field& u)
+            f_h[d].cons_flux_function = [f](samurai::FluxValue<cfg>& flux, const samurai::StencilData<cfg>& data, const samurai::StencilValues<cfg>& u)
             {
-                auto& L = cells[0];
-                auto& R = cells[1];
-                return (f(u[L]) + f(u[R])) / 2;
+                static constexpr std::size_t L = 0;
+                static constexpr std::size_t R = 1;
+
+                flux = (f(u[L]) + f(u[R])) / 2;
             };
         });
 
@@ -959,7 +960,7 @@ We have
 .. math::
     \int_V \nabla \cdot \mathbf{u}\otimes\mathbf{u} = \int_{\partial V} (\mathbf{u}\otimes\mathbf{u})\mathbf{n}.
 
-Developped in 2D, where :math:`\mathbf{u} := [u\;v]`, it reads
+Developed in 2D, where :math:`\mathbf{u} := [u\;v]`, it reads
 
 .. math::
     (\mathbf{u}\otimes\mathbf{u})\mathbf{n} =
@@ -1001,19 +1002,21 @@ We choose the upwind scheme, and implement:
     samurai::FluxDefinition<cfg> upwind_f;
 
     // x-direction
-    upwind_f[0].cons_flux_function = [f_x](auto& cells, const Field& u)
+    upwind_f[0].cons_flux_function = [f_x](samurai::FluxValue<cfg>& flux, const samurai::StencilData<cfg>& data, const samurai::StencilValues<cfg>& u)
     {
-        auto& L = cells[0]; // left
-        auto& R = cells[1]; // right
-        return u[L](0) >= 0 ? f_x(u[L]) : f_x(u[R]);
+        static constexpr std::size_t L = 0; // left
+        static constexpr std::size_t R = 1; // right
+
+        flux = u[L](0) >= 0 ? f_x(u[L]) : f_x(u[R]);
     };
 
     // y-direction
-    upwind_f[1].cons_flux_function = [f_y](auto& cells, const Field& u)
+    upwind_f[1].cons_flux_function = [f_y](samurai::FluxValue<cfg>& flux, const samurai::StencilData<cfg>& data, const samurai::StencilValues<cfg>& u)
     {
-        auto& B = cells[0]; // bottom
-        auto& T = cells[1]; // top
-        return u[B](1) >= 0 ? f_y(u[B]) : f_y(u[T]);
+        static constexpr std::size_t B = 0; // bottom
+        static constexpr std::size_t T = 1; // top
+
+        flux = u[B](1) >= 0 ? f_y(u[B]) : f_y(u[T]);
     };
 
     return samurai::make_flux_based_scheme(upwind_f);
@@ -1039,11 +1042,12 @@ where :math:`u_d` is the :math:`d`-th component of :math:`\mathbf{u}`, the code 
                 return u(d) * u;
             };
 
-            upwind_f[d].cons_flux_function = [f_d](auto& cells, const Field& u)
+            upwind_f[d].cons_flux_function = [f_d](samurai::FluxValue<cfg>& flux, const samurai::StencilData<cfg>& data, const samurai::StencilValues<cfg>& u)
             {
-                auto& L = cells[0];
-                auto& R = cells[1];
-                return u[L](d) >= 0 ? f_d(u[L]) : f_d(u[R]);
+                static constexpr std::size_t L = 0;
+                static constexpr std::size_t R = 1;
+
+                flux = u[L](d) >= 0 ? f_d(u[L]) : f_d(u[R]);
             };
         });
 
@@ -1055,7 +1059,7 @@ Implementing a non-conservative scheme
 --------------------------------------
 
 Flux-based, non-conservative schemes also exist.
-Exemples can be found in two-phase flow simulation: while the scheme remains conservative within each phase, non-conservative fluxes can be computed at the interface between phases.
+Examples can be found in two-phase flow simulation: while the scheme remains conservative within each phase, non-conservative fluxes can be computed at the interface between phases.
 
 We recall :math:`V_L` and :math:`V_R`, the two cells sharing the face :math:`F`, and ordered in the direction of the corresponding Cartesian vector
 (i.e., in the x-direction, :math:`V_L` and :math:`V_R` are the left and right cells, respectively).
@@ -1086,33 +1090,20 @@ The signature is the same as :code:`flux_function`, except that it returns two v
 
     samurai::FluxDefinition<cfg> my_flux;
 
-    my_flux[0].flux_function = [](auto& cells, const Field& u)
+    my_flux[0].flux_function = [](samurai::FluxValuePair<cfg>& flux, const samurai::StencilData<cfg>& data, const samurai::StencilValues<cfg>& u)
                                {
-                                   samurai::FluxValuePair<cfg> flux;
                                    flux[0] = ...; // left --> right (direction '+')
                                    flux[1] = ...; // right --> left (direction '-')
-                                   return flux;
-                               };
-
-Alternatively, you can also write
-
-.. code-block:: c++
-
-    my_flux[0].flux_function = [](auto& cells, const Field& u) -> samurai::FluxValuePair<cfg>
-                               {
-                                   samurai::FluxValue<cfg> fluxLR = ...; // left --> right (direction '+')
-                                   samurai::FluxValue<cfg> fluxRL = ...; // right --> left (direction '-')
-                                   return {fluxLR, fluxRL};
                                };
 
 For instance, conservativity can be enforced by
 
 .. code-block:: c++
 
-    my_flux[0].flux_function = [](auto& cells, const Field& u) -> samurai::FluxValuePair<cfg>
+    my_flux[0].flux_function = [](samurai::FluxValuePair<cfg>& flux, const samurai::StencilData<cfg>& data, const samurai::StencilValues<cfg>& u)
                                {
-                                   samurai::FluxValue<cfg> flux = ...;
-                                   return {flux, -flux};
+                                   flux[0] = ...;
+                                   flux[1] = -flux[0];
                                };
 
 Available implementations

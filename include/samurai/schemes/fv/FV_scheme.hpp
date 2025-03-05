@@ -3,6 +3,7 @@
 #include "../../boundary.hpp"
 #include "../../field.hpp"
 #include "../../static_algorithm.hpp"
+#include "../../timers.hpp"
 #include "utils.hpp"
 
 namespace samurai
@@ -81,7 +82,7 @@ namespace samurai
 
     /**
      * Finite Volume scheme.
-     * This is the base class of CellBasedScheme and FluxBasedSchemeAssembly.
+     * This is the base class of CellBasedScheme and FluxBasedScheme.
      * It contains the management of
      *     - the boundary conditions
      *     - the projection/prediction ghosts
@@ -98,6 +99,7 @@ namespace samurai
         using mesh_t           = typename field_t::mesh_t;
         using mesh_id_t        = typename mesh_t::mesh_id_t;
         using field_value_type = typename field_t::value_type; // double
+        using size_type        = typename field_t::size_type;
 
         using cfg                                             = cfg_;
         using bdry_cfg                                        = bdry_cfg_;
@@ -166,16 +168,38 @@ namespace samurai
         /**
          * Explicit application of the scheme
          */
-        auto operator()(input_field_t& input_field) const
+        auto operator()(input_field_t& input_field)
         {
+            times::timers.start(name() + " operator");
             auto explicit_scheme = make_explicit(derived_cast());
-            return explicit_scheme.apply_to(input_field);
+            auto output_field    = explicit_scheme.apply_to(input_field);
+            times::timers.stop(name() + " operator");
+            return output_field;
         }
 
-        void apply(output_field_t& output_field, input_field_t& input_field) const
+        void apply(output_field_t& output_field, input_field_t& input_field)
         {
+            times::timers.start(name() + " operator");
             auto explicit_scheme = make_explicit(derived_cast());
             explicit_scheme.apply(output_field, input_field);
+            times::timers.stop(name() + " operator");
+        }
+
+        auto operator()(std::size_t d, input_field_t& input_field)
+        {
+            times::timers.start(name() + " operator");
+            auto explicit_scheme = make_explicit(derived_cast());
+            auto output_field    = explicit_scheme.apply_to(d, input_field);
+            times::timers.stop(name() + " operator");
+            return output_field;
+        }
+
+        void apply(std::size_t d, output_field_t& output_field, input_field_t& input_field)
+        {
+            times::timers.start(name() + " operator");
+            auto explicit_scheme = make_explicit(derived_cast());
+            explicit_scheme.apply(d, output_field, input_field);
+            times::timers.stop(name() + " operator");
         }
 
         /**
@@ -183,8 +207,8 @@ namespace samurai
          */
         inline field_value_type cell_coeff(const StencilJacobian<cfg>& coeffs,
                                            std::size_t cell_number_in_stencil,
-                                           [[maybe_unused]] std::size_t field_i,
-                                           [[maybe_unused]] std::size_t field_j) const
+                                           [[maybe_unused]] size_type field_i,
+                                           [[maybe_unused]] size_type field_j) const
         {
             if constexpr (field_size == 1 && output_field_size == 1)
             {
@@ -198,8 +222,8 @@ namespace samurai
 
         inline field_value_type bdry_cell_coeff(const bdry_stencil_coeffs_t& coeffs,
                                                 std::size_t cell_number_in_stencil,
-                                                [[maybe_unused]] std::size_t field_i,
-                                                [[maybe_unused]] std::size_t field_j) const
+                                                [[maybe_unused]] size_type field_i,
+                                                [[maybe_unused]] size_type field_j) const
         {
             if constexpr (field_size == 1 && output_field_size == 1)
             {

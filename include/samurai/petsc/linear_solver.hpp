@@ -28,7 +28,7 @@ namespace samurai
 
           public:
 
-            explicit LinearSolverBase(const scheme_t& scheme)
+            explicit LinearSolverBase(scheme_t& scheme)
                 : m_assembly(scheme)
             {
                 _configure_solver();
@@ -123,6 +123,24 @@ namespace samurai
 
           public:
 
+            void assemble_matrix()
+            {
+                if (m_A == nullptr)
+                {
+                    if (assembly().undefined_unknown())
+                    {
+                        std::cerr << "Undefined unknown(s) for this linear system. Please set the unknowns using the instruction '[solver].set_unknown(u);' or '[solver].set_unknowns(u1, u2...);'."
+                                  << std::endl;
+                        assert(false && "Undefined unknown(s)");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    assembly().create_matrix(m_A);
+                    assembly().assemble_matrix(m_A);
+                    PetscObjectSetName(reinterpret_cast<PetscObject>(m_A), "A");
+                }
+            }
+
             virtual void setup()
             {
                 if (is_set_up())
@@ -130,24 +148,18 @@ namespace samurai
                     return;
                 }
 
-                if (assembly().undefined_unknown())
-                {
-                    std::cerr << "Undefined unknown(s) for this linear system. Please set the unknowns using the instruction '[solver].set_unknown(u);' or '[solver].set_unknowns(u1, u2...);'."
-                              << std::endl;
-                    assert(false && "Undefined unknown(s)");
-                    exit(EXIT_FAILURE);
-                }
-
-                assembly().create_matrix(m_A);
-                assembly().assemble_matrix(m_A);
-                PetscObjectSetName(reinterpret_cast<PetscObject>(m_A), "A");
+                assemble_matrix();
 
                 // PetscBool is_symmetric;
                 // MatIsSymmetric(m_A, 0, &is_symmetric);
 
                 KSPSetOperators(m_ksp, m_A, m_A);
-                PetscInt err = KSPSetUp(m_ksp);
-                if (err != 0)
+
+                times::timers.start("solver setup");
+                PetscErrorCode err = KSPSetUp(m_ksp);
+                times::timers.stop("solver setup");
+
+                if (err != PETSC_SUCCESS)
                 {
                     std::cerr << "The setup of the solver failed!" << std::endl;
                     assert(false && "Failed solver setup");
@@ -160,6 +172,8 @@ namespace samurai
 
             void prepare_rhs_and_solve(Vec& b, Vec& x)
             {
+                times::timers.start("system solve");
+
                 // Update the right-hand side with the boundary conditions stored in the solution field
                 assembly().enforce_bc(b);
                 // Set to zero the right-hand side of the ghost equations
@@ -168,14 +182,19 @@ namespace samurai
                 assembly().set_0_for_useless_ghosts(b);
                 // VecView(b, PETSC_VIEWER_STDOUT_(PETSC_COMM_SELF)); std::cout << std::endl;
                 // assert(check_nan_or_inf(b));
+                times::timers.stop("system solve");
 
                 solve_system(b, x);
             }
 
             void solve_system(Vec& b, Vec& x)
             {
+                times::timers.start("system solve");
+
                 // Solve the system
                 KSPSolve(m_ksp, b, x);
+
+                times::timers.stop("system solve");
 
                 KSPConvergedReason reason_code;
                 KSPGetConvergedReason(m_ksp, &reason_code);
@@ -233,7 +252,7 @@ namespace samurai
 
           public:
 
-            explicit LinearSolver(const scheme_t& scheme)
+            explicit LinearSolver(scheme_t& scheme)
                 : base_class(scheme)
             {
                 _configure_solver();
@@ -321,7 +340,10 @@ namespace samurai
 
                     KSPSetOperators(m_ksp, m_A, m_A);
                 }
+
+                times::timers.start("solver setup");
                 KSPSetUp(m_ksp);
+                times::timers.stop("solver setup");
                 m_is_set_up = true;
             }
 

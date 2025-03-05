@@ -76,7 +76,9 @@ namespace samurai
                 }
             });
 
-        return make_flux_based_scheme(upwind);
+        auto scheme = make_flux_based_scheme(upwind);
+        scheme.set_name("convection");
+        return scheme;
     }
 
     /**
@@ -90,6 +92,7 @@ namespace samurai
 
         static constexpr std::size_t dim               = Field::dim;
         static constexpr std::size_t field_size        = Field::size;
+        static constexpr bool is_soa                   = Field::is_soa;
         static constexpr std::size_t output_field_size = field_size;
         static constexpr std::size_t stencil_size      = 6;
 
@@ -109,25 +112,29 @@ namespace samurai
 
                 if (velocity(d) >= 0)
                 {
-                    weno5[d].cons_flux_function = [&velocity](auto& cells, const Field& u) -> FluxValue<cfg>
+                    weno5[d].cons_flux_function =
+                        [&velocity](FluxValue<cfg>& flux, const StencilData<cfg>& /*data*/, const StencilValues<cfg>& u)
                     {
-                        Array<FluxValue<cfg>, 5> f({u[cells[0]], u[cells[1]], u[cells[2]], u[cells[3]], u[cells[4]]});
+                        Array<FluxValue<cfg>, 5, is_soa> f({u[0], u[1], u[2], u[3], u[4]});
                         f *= velocity(d);
-                        return compute_weno5_flux(f);
+                        compute_weno5_flux(flux, f);
                     };
                 }
                 else
                 {
-                    weno5[d].cons_flux_function = [&velocity](auto& cells, const Field& u) -> FluxValue<cfg>
+                    weno5[d].cons_flux_function =
+                        [&velocity](FluxValue<cfg>& flux, const StencilData<cfg>& /*data*/, const StencilValues<cfg>& u)
                     {
-                        Array<FluxValue<cfg>, 5> f({u[cells[5]], u[cells[4]], u[cells[3]], u[cells[2]], u[cells[1]]});
+                        Array<FluxValue<cfg>, 5, is_soa> f({u[5], u[4], u[3], u[2], u[1]});
                         f *= velocity(d);
-                        return compute_weno5_flux(f);
+                        compute_weno5_flux(flux, f);
                     };
                 }
             });
 
-        return make_flux_based_scheme(weno5);
+        auto scheme = make_flux_based_scheme(weno5);
+        scheme.set_name("convection");
+        return scheme;
     }
 
     /**
@@ -197,7 +204,9 @@ namespace samurai
                 };
             });
 
-        return make_flux_based_scheme(upwind);
+        auto scheme = make_flux_based_scheme(upwind);
+        scheme.set_name("convection");
+        return scheme;
     }
 
     /**
@@ -211,6 +220,7 @@ namespace samurai
 
         static constexpr std::size_t dim               = Field::dim;
         static constexpr std::size_t field_size        = Field::size;
+        static constexpr bool is_soa                   = Field::is_soa;
         static constexpr std::size_t output_field_size = field_size;
         static constexpr std::size_t stencil_size      = 6;
 
@@ -228,28 +238,31 @@ namespace samurai
                 //        weno5[1].stencil = {{ 0,-2}, { 0,-1}, {0,0}, {0,1}, {0,2}, {0,3}};
                 weno5[d].stencil = line_stencil<dim, d>(-2, -1, 0, 1, 2, 3);
 
-                weno5[d].cons_flux_function = [&velocity_field](auto& cells, const Field& u) -> FluxValue<cfg>
+                weno5[d].cons_flux_function =
+                    [&velocity_field](FluxValue<cfg>& flux, const StencilData<cfg>& data, const StencilValues<cfg>& u)
                 {
                     static constexpr std::size_t stencil_center = 2;
 
-                    auto v = velocity_field[cells[stencil_center]](d);
+                    auto v = velocity_field[data.cells[stencil_center]](d);
 
                     if (v >= 0)
                     {
-                        Array<FluxValue<cfg>, 5> f({u[cells[0]], u[cells[1]], u[cells[2]], u[cells[3]], u[cells[4]]});
+                        Array<FluxValue<cfg>, 5, is_soa> f({u[0], u[1], u[2], u[3], u[4]});
                         f *= v;
-                        return compute_weno5_flux(f);
+                        compute_weno5_flux(flux, f);
                     }
                     else
                     {
-                        Array<FluxValue<cfg>, 5> f({u[cells[5]], u[cells[4]], u[cells[3]], u[cells[2]], u[cells[1]]});
+                        Array<FluxValue<cfg>, 5, is_soa> f({u[5], u[4], u[3], u[2], u[1]});
                         f *= v;
-                        return compute_weno5_flux(f);
+                        compute_weno5_flux(flux, f);
                     }
                 };
             });
 
-        return make_flux_based_scheme(weno5);
+        auto scheme = make_flux_based_scheme(weno5);
+        scheme.set_name("convection");
+        return scheme;
     }
 
 } // end namespace samurai

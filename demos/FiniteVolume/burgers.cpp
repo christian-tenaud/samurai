@@ -1,24 +1,23 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <samurai/hdf5.hpp>
 #include <samurai/mr/adapt.hpp>
 #include <samurai/mr/mesh.hpp>
-#include <samurai/reconstruction.hpp>
 #include <samurai/samurai.hpp>
 #include <samurai/schemes/fv.hpp>
 
 #include <filesystem>
 namespace fs = std::filesystem;
 
-template <std::size_t dim>
-double exact_solution(xt::xtensor_fixed<double, xt::xshape<dim>> coords, double t)
+template <std::size_t field_size, std::size_t dim>
+auto exact_solution(xt::xtensor_fixed<double, xt::xshape<dim>> coords, double t)
 {
     const double a  = 1;
     const double b  = 0;
     const double& x = coords(0);
-    return (a * x + b) / (a * t + 1);
+    auto value      = (a * x + b) / (a * t + 1);
+    return samurai::CollapsArray<double, field_size, false>(value);
 }
 
 template <class Field>
@@ -38,13 +37,18 @@ void save(const fs::path& path, const std::string& filename, const Field& u, con
                                level_[cell] = cell.level;
                            });
 
+#ifdef SAMURAI_WITH_MPI
+    mpi::communicator world;
+    samurai::save(path, fmt::format("{}_size_{}{}", filename, world.size(), suffix), mesh, u, level_);
+#else
     samurai::save(path, fmt::format("{}{}", filename, suffix), mesh, u, level_);
+#endif
 }
 
 template <std::size_t dim, std::size_t field_size>
 int main_dim(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("Finite volume example for the Burgers equation", argc, argv);
 
     using Config  = samurai::MRConfig<dim, 3>;
     using Box     = samurai::Box<double, dim>;
@@ -77,7 +81,6 @@ int main_dim(int argc, char* argv[])
     std::string filename = "burgers_" + std::to_string(dim) + "D";
     std::size_t nfiles   = 50;
 
-    CLI::App app{"Finite volume example for the heat equation in 1d"};
     app.add_option("--left", left_box, "The left border of the box")->capture_default_str()->group("Simulation parameters");
     app.add_option("--right", right_box, "The right border of the box")->capture_default_str()->group("Simulation parameters");
     app.add_option("--init-sol", init_sol, "Initial solution: hat/linear/bands")->capture_default_str()->group("Simulation parameters");
@@ -95,11 +98,11 @@ int main_dim(int argc, char* argv[])
                    "adapt the mesh")
         ->capture_default_str()
         ->group("Multiresolution");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Ouput");
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Output");
     app.allow_extras();
-    CLI11_PARSE(app, argc, argv);
+    SAMURAI_PARSE(argc, argv);
 
     //--------------------//
     // Problem definition //
@@ -122,7 +125,7 @@ int main_dim(int argc, char* argv[])
         samurai::for_each_cell(mesh,
                                [&](auto& cell)
                                {
-                                   u[cell] = exact_solution(cell.center(), 0);
+                                   u[cell] = exact_solution<field_size>(cell.center(), 0);
                                });
     }
     else if (init_sol == "hat")
@@ -136,22 +139,12 @@ int main_dim(int argc, char* argv[])
                                    double dist = 0;
                                    for (std::size_t d = 0; d < dim; ++d)
                                    {
-                                       dist += pow(cell.center(d), 2);
+                                       dist += std::pow(cell.center(d), 2);
                                    }
-                                   dist = sqrt(dist);
+                                   dist = std::sqrt(dist);
 
                                    double value = (dist <= r) ? (-max / r * dist + max) : 0;
-                                   if constexpr (field_size == 1)
-                                   {
-                                       u[cell] = value;
-                                   }
-                                   else
-                                   {
-                                       for (std::size_t field_i = 0; field_i < field_size; ++field_i)
-                                       {
-                                           u[cell][field_i] = value;
-                                       }
-                                   }
+                                   u[cell]      = value;
                                });
     }
     else if (dim > 1 && field_size > 1 && init_sol == "bands")
@@ -162,19 +155,20 @@ int main_dim(int argc, char* argv[])
                                    [&](auto& cell)
                                    {
                                        const double max = 2;
+                                       using size_type  = typename decltype(u)::size_type;
                                        for (std::size_t d = 0; d < dim; ++d)
                                        {
                                            if (cell.center(d) >= -0.5 && cell.center(d) <= 0)
                                            {
-                                               u[cell][d] = 2 * max * cell.center(d) + max;
+                                               u[cell][static_cast<size_type>(d)] = 2 * max * cell.center(d) + max;
                                            }
                                            else if (cell.center(d) >= 0 && cell.center(d) <= 0.5)
                                            {
-                                               u[cell][d] = -2 * max * cell.center(d) + max;
+                                               u[cell][static_cast<size_type>(d)] = -2 * max * cell.center(d) + max;
                                            }
                                            else
                                            {
-                                               u[cell][d] = 0;
+                                               u[cell][static_cast<size_type>(d)] = 0;
                                            }
                                        }
                                    });
@@ -192,7 +186,7 @@ int main_dim(int argc, char* argv[])
         samurai::make_bc<samurai::Dirichlet<3>>(u,
                                                 [&](const auto&, const auto&, const auto& coord)
                                                 {
-                                                    return exact_solution(coord, 0);
+                                                    return exact_solution<field_size>(coord, 0);
                                                 });
     }
     else
@@ -221,7 +215,7 @@ int main_dim(int argc, char* argv[])
     //   Time iteration   //
     //--------------------//
 
-    double dx = samurai::cell_length(max_level);
+    double dx = mesh.cell_length(max_level);
     dt        = cfl * dx / pow(2, dim);
 
     auto MRadaptation = samurai::make_MRAdapt(u);
@@ -260,7 +254,7 @@ int main_dim(int argc, char* argv[])
             samurai::make_bc<samurai::Dirichlet<3>>(u,
                                                     [&](const auto&, const auto&, const auto& coord)
                                                     {
-                                                        return exact_solution(coord, t - dt);
+                                                        return exact_solution<field_size>(coord, t - dt);
                                                     });
         }
 
@@ -288,7 +282,7 @@ int main_dim(int argc, char* argv[])
             double error = samurai::L2_error(u,
                                              [&](const auto& coord)
                                              {
-                                                 return exact_solution(coord, t);
+                                                 return exact_solution<field_size>(coord, t);
                                              });
             std::cout << ", L2-error: " << std::scientific << std::setprecision(2) << error;
 
@@ -300,7 +294,7 @@ int main_dim(int argc, char* argv[])
                 error         = samurai::L2_error(u_recons,
                                           [&](const auto& coord)
                                           {
-                                              return exact_solution(coord, t);
+                                              return exact_solution<field_size>(coord, t);
                                           });
                 std::cout << ", L2-error (recons): " << std::scientific << std::setprecision(2) << error;
             }

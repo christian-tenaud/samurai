@@ -45,8 +45,8 @@ def test_finite_volume_demo_heat_explicit(config):
            "--init-sol", "dirac",
            "--Tf", "0.1",
            "--cfl", "0.95",
-           "--min_level", "0",
-           "--max_level", "3"]
+           "--min-level", "3",
+           "--max-level", "6"]
     output = subprocess.run(cmd, check=True, capture_output=True)
 
 @pytest.mark.h5diff()
@@ -58,8 +58,8 @@ def test_finite_volume_demo_heat_implicit(config):
            "--save-final-state-only",
            "--init-sol", "dirac",
            "--Tf", "0.1",
-           "--min_level", "0",
-           "--max_level", "3",
+           "--min-level", "3",
+           "--max-level", "6",
            "-ksp_type", "preonly",
            "-pc_type", "lu"]
     output = subprocess.run(cmd, check=True, capture_output=True)
@@ -74,8 +74,8 @@ def test_finite_volume_demo_heat_heterogeneous_explicit(config):
            "--explicit",
            "--Tf", "0.1",
            "--cfl", "0.95",
-           "--min_level", "0",
-           "--max_level", "3"]
+           "--min-level", "3",
+           "--max-level", "6"]
     output = subprocess.run(cmd, check=True, capture_output=True)
 
 @pytest.mark.h5diff()
@@ -86,8 +86,8 @@ def test_finite_volume_demo_heat_heterogeneous_implicit(config):
            '--filename', config['filename'],
            "--save-final-state-only",
            "--Tf", "0.1",
-           "--min_level", "0",
-           "--max_level", "3",
+           "--min-level", "3",
+           "--max-level", "6",
            "-ksp_type", "preonly",
            "-pc_type", "lu"]
     output = subprocess.run(cmd, check=True, capture_output=True)
@@ -123,10 +123,23 @@ def test_finite_volume_demo_burgers(config):
            "--path", config['path'],
            '--filename', config['filename'],
            "--nfiles", "1",
-           "--min-level", "1",
-           "--max-level", "4",
+           "--min-level", "2",
+           "--max-level", "5",
            "--init-sol", "hat",
            "--Tf", "0.1"]
+    output = subprocess.run(cmd, check=True, capture_output=True)
+
+@pytest.mark.h5diff()
+@pytest.mark.skipif(sys.platform == "darwin", reason = "skipped on macos because libpthread is missing on github worker")
+def test_finite_volume_demo_mra_burgers(config):
+    cmd = [get_executable(Path("../build/demos/FiniteVolume/"), "finite-volume-burgers-mra"),
+           "--path", config['path'],
+           '--filename', config['filename'],
+           "--nfiles", "1",
+           "--min-level", "2",
+           "--max-level", "9",
+           "--init-sol", "hat",
+           "--mr-eps", "1e-5"]
     output = subprocess.run(cmd, check=True, capture_output=True)
 
 @pytest.mark.h5diff()
@@ -136,8 +149,8 @@ def test_finite_volume_demo_nagumo_imp_diff_imp_react(config):
            "--path", config['path'],
            '--filename', config['filename'],
            "--save-final-state-only",
-           "--min-level", "0",
-           "--max-level", "4",
+           "--min-level", "4",
+           "--max-level", "8",
            "-ksp_type", "preonly",
            "-pc_type", "lu",
            "--Tf", "0.1",
@@ -151,8 +164,8 @@ def test_finite_volume_demo_nagumo_exp_diff_imp_react(config):
            "--path", config['path'],
            '--filename', config['filename'],
            "--save-final-state-only",
-           "--min-level", "0",
-           "--max-level", "4",
+           "--min-level", "4",
+           "--max-level", "8",
            "--explicit-diffusion",
            "-ksp_type", "preonly",
            "-pc_type", "lu",
@@ -166,8 +179,8 @@ def test_finite_volume_demo_nagumo_imp_diff_exp_react(config):
            "--path", config['path'],
            '--filename', config['filename'],
            "--save-final-state-only",
-           "--min-level", "0",
-           "--max-level", "4",
+           "--min-level", "4",
+           "--max-level", "8",
            "--explicit-reaction",
            "-ksp_type", "preonly",
            "-pc_type", "lu",
@@ -182,8 +195,8 @@ def test_finite_volume_demo_nagumo_exp_diff_exp_react(config):
            "--path", config['path'],
            '--filename', config['filename'],
            "--save-final-state-only",
-           "--min-level", "0",
-           "--max-level", "4",
+           "--min-level", "4",
+           "--max-level", "8",
            "--explicit-diffusion",
            "--explicit-reaction",
            "--Tf", "0.01"]
@@ -208,7 +221,7 @@ def test_finite_volume_demo_linear_convection(config):
            "--path", config['path'],
            '--filename', config['filename'],
            "--nfiles", "1",
-           "--min-level", "0",
-           "--max-level", "5",
+           "--min-level", "1",
+           "--max-level", "6",
            "--Tf", "0.1"]
     output = subprocess.run(cmd, check=True, capture_output=True)

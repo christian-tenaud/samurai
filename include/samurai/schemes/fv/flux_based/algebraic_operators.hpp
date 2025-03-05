@@ -21,14 +21,14 @@ namespace samurai
                     // Multiply the flux function by the scalar
                     if constexpr (cfg::scheme_type == SchemeType::LinearHomogeneous)
                     {
-                        multiplied_scheme.flux_definition()[d].cons_flux_function = [=](auto h)
+                        multiplied_scheme.flux_definition()[d].cons_flux_function = [=](auto h) -> FluxStencilCoeffs<cfg>
                         {
                             return scalar * scheme.flux_definition()[d].cons_flux_function(h);
                         };
                     }
                     else if constexpr (cfg::scheme_type == SchemeType::LinearHeterogeneous)
                     {
-                        multiplied_scheme.flux_definition()[d].cons_flux_function = [=](auto& cells)
+                        multiplied_scheme.flux_definition()[d].cons_flux_function = [=](auto& cells) -> FluxStencilCoeffs<cfg>
                         {
                             return scalar * scheme.flux_definition()[d].cons_flux_function(cells);
                         };
@@ -37,28 +37,33 @@ namespace samurai
                     {
                         if (scheme.flux_definition()[d].cons_flux_function)
                         {
-                            multiplied_scheme.flux_definition()[d].cons_flux_function = [=](auto& cells, const auto& field)
+                            multiplied_scheme.flux_definition()[d].cons_flux_function = [=](auto& flux, const auto& data, const auto& field)
                             {
-                                return scalar * scheme.flux_definition()[d].cons_flux_function(cells, field);
+                                scheme.flux_definition()[d].cons_flux_function(flux, data, field);
+                                flux *= scalar;
                             };
                         }
                         if (scheme.flux_definition()[d].flux_function)
                         {
-                            multiplied_scheme.flux_definition()[d].flux_function = [=](auto& cells, const auto& field)
+                            multiplied_scheme.flux_definition()[d].flux_function =
+                                [=](auto& flux_value_pair, const auto& data, const auto& field)
                             {
-                                return scalar * scheme.flux_definition()[d].flux_function(cells, field);
+                                scheme.flux_definition()[d].flux_function(flux_value_pair, data, field);
+                                flux_value_pair *= scalar;
                             };
                         }
                         if (scheme.flux_definition()[d].cons_jacobian_function)
                         {
-                            multiplied_scheme.flux_definition()[d].cons_jacobian_function = [=](auto& cells, const auto& field)
+                            multiplied_scheme.flux_definition()[d].cons_jacobian_function = [=](auto& cells,
+                                                                                                const auto& field) -> StencilJacobian<cfg>
                             {
                                 return scalar * scheme.flux_definition()[d].cons_jacobian_function(cells, field);
                             };
                         }
                         if (scheme.flux_definition()[d].jacobian_function)
                         {
-                            multiplied_scheme.flux_definition()[d].jacobian_function = [=](auto& cells, const auto& field)
+                            multiplied_scheme.flux_definition()[d].jacobian_function = [=](auto& cells,
+                                                                                           const auto& field) -> StencilJacobianPair<cfg>
                             {
                                 return scalar * scheme.flux_definition()[d].jacobian_function(cells, field);
                             };
@@ -68,7 +73,16 @@ namespace samurai
             });
 
         multiplied_scheme.is_spd(scheme.is_spd() && scalar != 0);
-        multiplied_scheme.set_name(std::to_string(scalar) + " * " + scheme.name());
+        std::ostringstream name;
+        if (scalar == static_cast<int>(scalar))
+        {
+            name << static_cast<int>(scalar) << " * " << scheme.name();
+        }
+        else
+        {
+            name << std::setprecision(1) << std::scientific << scalar << " * " << scheme.name();
+        }
+        multiplied_scheme.set_name(name.str());
         return multiplied_scheme;
     }
 

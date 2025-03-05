@@ -1,8 +1,25 @@
 #pragma once
+#include "../timers.hpp"
 #include "gauss_legendre.hpp"
 
 namespace samurai
 {
+    template <class scalar_or_vectorview>
+    double __square(scalar_or_vectorview x)
+    {
+        double norm_square;
+        if constexpr (std::is_same_v<scalar_or_vectorview, double>) // scalar
+        {
+            norm_square = x * x;
+        }
+        else // vector view
+        {
+            using namespace samurai::math;
+            norm_square = sum(x * x);
+        }
+        return norm_square;
+    }
+
     /**
      * Computes the L2-error with respect to an exact solution.
      * @tparam relative_error: if true, compute the relative error instead of the absolute one.
@@ -10,6 +27,8 @@ namespace samurai
     template <bool relative_error, class Field, class Func>
     double L2_error(Field& approximate, Func&& exact)
     {
+        times::timers.start("error computation");
+
         // In FV, we want only 1 quadrature point.
         // This is equivalent to
         //       error += pow(exact(cell.center()) - approximate(cell.index), 2) * cell.length^dim;
@@ -24,16 +43,7 @@ namespace samurai
                                                          [&](const auto& point)
                                                          {
                                                              auto e = exact(point) - approximate[cell];
-                                                             double norm_square;
-                                                             if constexpr (Field::size == 1)
-                                                             {
-                                                                 norm_square = e * e;
-                                                             }
-                                                             else
-                                                             {
-                                                                 norm_square = xt::sum(e * e)();
-                                                             }
-                                                             return norm_square;
+                                                             return __square(e);
                                                          });
                           if constexpr (relative_error)
                           {
@@ -41,22 +51,16 @@ namespace samurai
                                                                 [&](const auto& point)
                                                                 {
                                                                     auto v = exact(point);
-                                                                    double v_square;
-                                                                    if constexpr (Field::size == 1)
-                                                                    {
-                                                                        v_square = v * v;
-                                                                    }
-                                                                    else
-                                                                    {
-                                                                        v_square = xt::sum(v * v)();
-                                                                    }
-                                                                    return v_square;
+                                                                    return __square(v);
                                                                 });
                           }
                       });
 
         error_norm    = sqrt(error_norm);
         solution_norm = sqrt(solution_norm);
+
+        times::timers.stop("error computation");
+
         if constexpr (relative_error)
         {
             return error_norm / solution_norm;

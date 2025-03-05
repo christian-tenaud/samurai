@@ -18,15 +18,18 @@ namespace samurai
         using input_field_t  = typename base_class::input_field_t;
         using output_field_t = typename base_class::output_field_t;
         using value_t        = typename input_field_t::value_type;
+        using size_type      = typename base_class::size_type;
         using base_class::scheme;
 
-        static constexpr std::size_t field_size        = input_field_t::size;
-        static constexpr std::size_t output_field_size = scheme_t::output_field_size;
-        static constexpr std::size_t stencil_size      = cfg::stencil_size;
+        static constexpr size_type field_size        = input_field_t::size;
+        static constexpr size_type output_field_size = scheme_t::output_field_size;
+        static constexpr std::size_t stencil_size    = cfg::stencil_size;
 
       public:
 
-        explicit Explicit(const scheme_t& s)
+        using base_class::apply;
+
+        explicit Explicit(scheme_t& s)
             : base_class(s)
         {
         }
@@ -50,9 +53,9 @@ namespace samurai
 
             using index_t = decltype(left_cell_index_init);
 
-            for (std::size_t field_i = 0; field_i < output_field_size; ++field_i)
+            for (size_type field_i = 0; field_i < output_field_size; ++field_i)
             {
-                for (std::size_t field_j = 0; field_j < field_size; ++field_j)
+                for (size_type field_j = 0; field_j < field_size; ++field_j)
                 {
                     for (std::size_t c = 0; c < stencil_size; ++c)
                     {
@@ -227,7 +230,7 @@ namespace samurai
 
       public:
 
-        void apply(output_field_t& output_field, input_field_t& input_field) const override
+        void apply(std::size_t d, output_field_t& output_field, input_field_t& input_field) override
         {
             /**
              * Implementation by matrix-vector multiplication
@@ -242,6 +245,7 @@ namespace samurai
 
             // Interior interfaces
             scheme().template for_each_interior_interface_and_coeffs<Run::Parallel, Get::Intervals>(
+                d,
                 input_field,
                 [&](auto& interface, auto& stencil, auto& left_cell_coeffs, auto& right_cell_coeffs)
                 {
@@ -268,12 +272,13 @@ namespace samurai
             if (scheme().include_boundary_fluxes())
             {
                 scheme().template for_each_boundary_interface_and_coeffs<Run::Parallel, Get::Intervals>(
+                    d,
                     input_field,
                     [&](auto& cell, auto& stencil, auto& coeffs)
                     {
-                        for (std::size_t field_i = 0; field_i < output_field_size; ++field_i)
+                        for (size_type field_i = 0; field_i < output_field_size; ++field_i)
                         {
-                            for (std::size_t field_j = 0; field_j < field_size; ++field_j)
+                            for (size_type field_j = 0; field_j < field_size; ++field_j)
                             {
                                 for (std::size_t c = 0; c < stencil_size; ++c)
                                 {
@@ -289,7 +294,7 @@ namespace samurai
                                     auto coeff = this->scheme().cell_coeff(coeffs, c, field_i, field_j);
                                     // field_value(output_field, cell, field_i) += coeff * field_value(input_field, stencil[c], field_j);
 
-                                    auto cell_index_init   = cell.index;
+                                    auto cell_index_init   = cell.cells()[0].index;
                                     auto comput_index_init = stencil.cells()[c].index;
 
                                     using index_t = decltype(cell_index_init);

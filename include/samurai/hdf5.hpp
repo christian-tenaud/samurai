@@ -37,6 +37,7 @@ namespace mpi = boost::mpi;
 
 #include "algorithm.hpp"
 #include "cell.hpp"
+#include "timers.hpp"
 #include "utils.hpp"
 
 namespace samurai
@@ -84,8 +85,9 @@ namespace samurai
     template <class Field, class SubMesh>
     auto extract_data(const Field& field, const SubMesh& submesh)
     {
-        std::array<std::size_t, 2> shape = {submesh.nb_cells(), field.size};
-        xt::xtensor<typename Field::value_type, 2> data(shape);
+        using size_type                       = typename Field::inner_types::size_type;
+        std::array<std::size_t, 2> data_shape = {submesh.nb_cells(), static_cast<std::size_t>(field.size)};
+        xt::xtensor<typename Field::value_type, 2> data(data_shape);
 
         if (submesh.nb_cells() != 0)
         {
@@ -93,7 +95,17 @@ namespace samurai
             for_each_cell(submesh,
                           [&](auto cell)
                           {
-                              xt::view(data, index) = field[cell];
+                              if constexpr (Field::size == 1)
+                              {
+                                  data(index, 0) = field[cell];
+                              }
+                              else
+                              {
+                                  for (size_type i = 0; i < field.size; ++i)
+                                  {
+                                      data(index, i) = field[cell][i];
+                                  }
+                              }
                               index++;
                           });
         }
@@ -306,7 +318,7 @@ namespace samurai
                                                           const Submesh& submesh,
                                                           std::index_sequence<I...>)
     {
-        (void)std::initializer_list<int>{(this->save_field(grid, prefix, submesh, std::get<I>(m_fields)), 0)...};
+        (this->save_field(grid, prefix, submesh, std::get<I>(m_fields)), ...);
     }
 
     template <class D, class Mesh, class... T>
@@ -969,17 +981,21 @@ namespace samurai
     template <std::size_t dim, class TInterval, class... T>
     void save(const fs::path& path, const std::string& filename, const LevelCellArray<dim, TInterval>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_LevelCellArray<LevelCellArray<dim, TInterval>, T...>;
         auto h5      = hdf5_t(path, filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <std::size_t dim, class TInterval, class... T>
     void save(const std::string& filename, const LevelCellArray<dim, TInterval>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_LevelCellArray<LevelCellArray<dim, TInterval>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <std::size_t dim, class TInterval, class... T>
@@ -989,9 +1005,11 @@ namespace samurai
               const LevelCellArray<dim, TInterval>& mesh,
               const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_LevelCellArray<LevelCellArray<dim, TInterval>, T...>;
         auto h5      = hdf5_t(path, filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <std::size_t dim, class TInterval, class... T>
@@ -1000,25 +1018,31 @@ namespace samurai
               const LevelCellArray<dim, TInterval>& mesh,
               const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_LevelCellArray<LevelCellArray<dim, TInterval>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <std::size_t dim, class TInterval, std::size_t max_size, class... T>
     void save(const fs::path& path, const std::string& filename, const CellArray<dim, TInterval, max_size>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_CellArray<CellArray<dim, TInterval, max_size>, T...>;
         auto h5      = hdf5_t(path, filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <std::size_t dim, class TInterval, std::size_t max_size, class... T>
     void save(const std::string& filename, const CellArray<dim, TInterval, max_size>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_CellArray<CellArray<dim, TInterval, max_size>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <std::size_t dim, class TInterval, std::size_t max_size, class... T>
@@ -1028,9 +1052,11 @@ namespace samurai
               const CellArray<dim, TInterval, max_size>& mesh,
               const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_CellArray<CellArray<dim, TInterval, max_size>, T...>;
         auto h5      = hdf5_t(path, filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <std::size_t dim, class TInterval, std::size_t max_size, class... T>
@@ -1039,25 +1065,31 @@ namespace samurai
               const CellArray<dim, TInterval, max_size>& mesh,
               const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_CellArray<CellArray<dim, TInterval, max_size>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class D, class Config, class... T>
     void save(const fs::path& path, const std::string& filename, const Mesh_base<D, Config>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base<Mesh_base<D, Config>, T...>;
         auto h5      = hdf5_t(path, filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class D, class Config, class... T>
     void save(const std::string& filename, const Mesh_base<D, Config>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base<Mesh_base<D, Config>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class D, class Config, class... T>
@@ -1067,34 +1099,42 @@ namespace samurai
               const Mesh_base<D, Config>& mesh,
               const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base<Mesh_base<D, Config>, T...>;
         auto h5      = hdf5_t(path, filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class D, class Config, class... T>
     void
     save(const std::string& filename, const Hdf5Options<Mesh_base<D, Config>>& options, const Mesh_base<D, Config>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base<Mesh_base<D, Config>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class Config, class... T>
     void save(const fs::path& path, const std::string& filename, const UniformMesh<Config>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base_level<UniformMesh<Config>, T...>;
         auto h5      = hdf5_t(path, filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class Config, class... T>
     void save(const std::string& filename, const UniformMesh<Config>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base_level<UniformMesh<Config>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, {}, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class Config, class... T>
@@ -1104,17 +1144,21 @@ namespace samurai
               const UniformMesh<Config>& mesh,
               const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base_level<UniformMesh<Config>, T...>;
         auto h5      = hdf5_t(path, filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 
     template <class Config, class... T>
     void
     save(const std::string& filename, const Hdf5Options<UniformMesh<Config>>& options, const UniformMesh<Config>& mesh, const T&... fields)
     {
+        times::timers.start("data saving");
         using hdf5_t = Hdf5_mesh_base_level<UniformMesh<Config>, T...>;
         auto h5      = hdf5_t(fs::current_path(), filename, options, mesh, fields...);
         h5.save();
+        times::timers.stop("data saving");
     }
 } // namespace samurai

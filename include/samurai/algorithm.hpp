@@ -219,7 +219,7 @@ namespace samurai
             for (index_value_t i = it->start; i < it->end; ++i)
             {
                 index[0] = i;
-                cell_t cell{lca.level(), index, it->index + i};
+                cell_t cell{lca.origin_point(), lca.scaling_factor(), lca.level(), index, it->index + i};
                 f(cell);
             }
         }
@@ -245,7 +245,7 @@ namespace samurai
                         index[d + 1] = it.index()[d];
                     }
                     index[0] = i;
-                    cell_t cell{lca.level(), index, it->index + i};
+                    cell_t cell{lca.origin_point(), lca.scaling_factor(), lca.level(), index, it->index + i};
                     f(cell);
                 }
             }
@@ -281,7 +281,7 @@ namespace samurai
                 for (index_value_t i = interval.start; i < interval.end; ++i)
                 {
                     index[0] = i;
-                    cell_t cell{set.level(), index, cell_index++};
+                    cell_t cell{lca.origin_point(), lca.scaling_factor(), set.level(), index, cell_index++};
                     f(cell);
                 }
             });
@@ -338,7 +338,7 @@ namespace samurai
             coord[d + 1] = index[d];
         }
         auto cell_index = mesh.get_index(level, coord);
-        cell_t cell{level, coord, cell_index};
+        cell_t cell{mesh.origin_point(), mesh.scaling_factor(), level, coord, cell_index};
         for (index_value_t ii = 0; ii < static_cast<index_value_t>(i.size()); ++ii)
         {
             f(cell);
@@ -363,25 +363,50 @@ namespace samurai
 
     namespace detail
     {
+        // template <class ForwardIt, class T>
+        // auto interval_search(ForwardIt first, ForwardIt last, const T& value)
+        // {
+        //     auto comp = [](const auto& interval, auto v)
+        //     {
+        //         return interval.end < v;
+        //     };
+
+        //     auto result = std::lower_bound(first, last, value, comp);
+
+        //     if (!(result == last) && !(comp(*result, value)))
+        //     {
+        //         if (result->contains(value))
+        //         {
+        //             return static_cast<int>(std::distance(first, result));
+        //         }
+        //     }
+        //     return -1;
+        // }
+
         template <class ForwardIt, class T>
-        auto my_binary_search(ForwardIt first, ForwardIt last, const T& value)
+        inline auto interval_search(ForwardIt first, ForwardIt last, const T& value)
         {
-            auto comp = [](const auto& interval, auto v)
+            for (int dist = 0; first != last; ++first, ++dist)
             {
-                return interval.end < v;
-            };
-
-            auto result = std::lower_bound(first, last, value, comp);
-
-            if (!(result == last) && !(comp(*result, value)))
-            {
-                if (result->contains(value))
+                if (first->contains(value))
                 {
-                    return static_cast<int>(std::distance(first, result));
+                    return dist;
                 }
             }
             return -1;
         }
+
+        // template <class ForwardIt, class T>
+        // inline auto interval_search(ForwardIt first, ForwardIt last, const T& value)
+        // {
+        //     auto it = std::find_if(first,
+        //                            last,
+        //                            [value](const auto& e)
+        //                            {
+        //                                return e.contains(value);
+        //                            });
+        //     return (it == last) ? -1 : static_cast<int>(std::distance(first, it));
+        // }
 
         template <std::size_t dim, class TInterval, class index_t = typename TInterval::index_t, class coord_index_t = typename TInterval::coord_index_t>
         inline auto find_impl(const LevelCellArray<dim, TInterval>& lca,
@@ -392,9 +417,9 @@ namespace samurai
         {
             using lca_t     = const LevelCellArray<dim, TInterval>;
             using diff_t    = typename lca_t::const_iterator::difference_type;
-            auto find_index = my_binary_search(lca[0].cbegin() + static_cast<diff_t>(start_index),
-                                               lca[0].cbegin() + static_cast<diff_t>(end_index),
-                                               coord[0]);
+            auto find_index = interval_search(lca[0].cbegin() + static_cast<diff_t>(start_index),
+                                              lca[0].cbegin() + static_cast<diff_t>(end_index),
+                                              coord[0]);
 
             return (find_index != -1) ? find_index + static_cast<diff_t>(start_index) : find_index;
         }
@@ -412,9 +437,9 @@ namespace samurai
         {
             using lca_t        = const LevelCellArray<dim, TInterval>;
             using diff_t       = typename lca_t::const_iterator::difference_type;
-            index_t find_index = my_binary_search(lca[N].cbegin() + static_cast<diff_t>(start_index),
-                                                  lca[N].cbegin() + static_cast<diff_t>(end_index),
-                                                  coord[N]);
+            index_t find_index = interval_search(lca[N].cbegin() + static_cast<diff_t>(start_index),
+                                                 lca[N].cbegin() + static_cast<diff_t>(end_index),
+                                                 coord[N]);
 
             if (find_index != -1)
             {
@@ -441,11 +466,64 @@ namespace samurai
     {
         using lca_t        = const LevelCellArray<dim, TInterval>;
         using diff_t       = typename lca_t::const_iterator::difference_type;
-        index_t find_index = detail::my_binary_search(lca[d].cbegin() + static_cast<diff_t>(start_index),
-                                                      lca[d].cbegin() + static_cast<diff_t>(end_index),
-                                                      coord);
+        index_t find_index = detail::interval_search(lca[d].cbegin() + static_cast<diff_t>(start_index),
+                                                     lca[d].cbegin() + static_cast<diff_t>(end_index),
+                                                     coord);
 
         return (find_index != -1) ? static_cast<std::size_t>(find_index) + start_index : std::numeric_limits<std::size_t>::max();
+    }
+
+    //----------------------------------------//
+    // Find a cell from Cartesian coordinates //
+    //----------------------------------------//
+
+    template <std::size_t dim, class TInterval>
+    inline auto
+    find_cell(const LevelCellArray<dim, TInterval>& lca, const typename LevelCellArray<dim, TInterval>::cell_t::coords_t& cartesian_coords)
+    {
+        using cell_t = typename LevelCellArray<dim, TInterval>::cell_t;
+
+        cell_t cell;
+        cell.length = 0; // cell not found
+
+        auto length  = lca.cell_length();
+        cell.indices = xt::floor((cartesian_coords - lca.origin_point()) / length);
+        auto offset  = find(lca, cell.indices);
+        if (offset >= 0)
+        {
+            auto interval     = lca[0][static_cast<std::size_t>(offset)];
+            cell.index        = interval.index + cell.indices[0];
+            cell.level        = lca.level();
+            cell.length       = length;
+            cell.origin_point = lca.origin_point();
+        }
+        return cell;
+    }
+
+    template <std::size_t dim, class TInterval, std::size_t max_size>
+    inline auto find_cell(const CellArray<dim, TInterval, max_size>& ca,
+                          const typename CellArray<dim, TInterval, max_size>::cell_t::coords_t& cartesian_coords)
+    {
+        using cell_t = typename CellArray<dim, TInterval, max_size>::cell_t;
+
+        cell_t cell;
+        cell.length = 0; // cell not found
+        for (std::size_t level = ca.min_level(); level <= ca.max_level(); ++level)
+        {
+            cell = find_cell(ca[level], cartesian_coords);
+            if (cell.length != 0)
+            {
+                break;
+            }
+        }
+        return cell;
+    }
+
+    template <class Mesh>
+    inline auto find_cell(const Mesh& mesh, const typename Mesh::cell_t::coords_t& cartesian_coords)
+    {
+        using mesh_id_t = typename Mesh::mesh_id_t;
+        return find_cell(mesh[mesh_id_t::cells], cartesian_coords);
     }
 
 } // namespace samurai

@@ -1,6 +1,5 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <iostream>
 
@@ -66,7 +65,8 @@ void refine_1(mesh_t& mesh, std::size_t max_level)
         samurai::for_each_interval(mesh,
                                    [&](std::size_t level, const auto& interval, const auto& index_yz)
                                    {
-                                       auto itag = interval.start + interval.index;
+                                       using size_type = typename decltype(cell_tag)::size_type;
+                                       auto itag       = static_cast<size_type>(interval.start + interval.index);
                                        for (coord_index_t i = interval.start; i < interval.end; ++i)
                                        {
                                            if (cell_tag[itag])
@@ -100,8 +100,8 @@ void refine_2(mesh_t& mesh, std::size_t max_level)
 
     for (std::size_t ite = 0; ite < max_level; ++ite)
     {
-        auto cell_tag = samurai::make_field<bool, 1>("tag", mesh);
-        cell_tag.fill(false);
+        auto cell_tag = samurai::make_field<int, 1>("tag", mesh);
+        cell_tag.fill(0);
 
         samurai::for_each_cell(mesh,
                                [&](auto cell)
@@ -114,7 +114,7 @@ void refine_2(mesh_t& mesh, std::size_t max_level)
                                    {
                                        if (x < 0.25 or (x == 0.75 and y == 0.75))
                                        {
-                                           cell_tag[cell] = true;
+                                           cell_tag[cell] = 1;
                                        }
                                    }
                                });
@@ -166,10 +166,11 @@ void refine_2(mesh_t& mesh, std::size_t max_level)
         samurai::for_each_interval(mesh[mesh_id_t::cells],
                                    [&](std::size_t level, const auto& interval, const auto& index_yz)
                                    {
-                                       auto itag = interval.start + interval.index;
+                                       using size_type = typename decltype(cell_tag)::size_type;
+                                       auto itag       = static_cast<size_type>(interval.start + interval.index);
                                        for (coord_index_t i = interval.start; i < interval.end; ++i)
                                        {
-                                           if (cell_tag[itag])
+                                           if (cell_tag[itag] == 1)
                                            {
                                                samurai::static_nested_loop<dim - 1, 0, 2>(
                                                    [&](auto stencil)
@@ -192,7 +193,11 @@ void refine_2(mesh_t& mesh, std::size_t max_level)
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("simple 2d p4est example (see "
+                                    "https://github.com/cburstedde/p4est/blob/master/example/"
+                                    "simple/simple2.c)",
+                                    argc,
+                                    argv);
 
     constexpr size_t dim = 2;
 
@@ -203,13 +208,10 @@ int main(int argc, char* argv[])
     fs::path path        = fs::current_path();
     std::string filename = "simple_2d";
 
-    CLI::App app{"simple 2d p4est example (see "
-                 "https://github.com/cburstedde/p4est/blob/master/example/"
-                 "simple/simple2.c)"};
     app.add_option("--max-level", max_level, "Maximum level of the adaptation")->capture_default_str()->group("Adaptation parameters");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    CLI11_PARSE(app, argc, argv);
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    SAMURAI_PARSE(argc, argv);
 
     if (!fs::exists(path))
     {

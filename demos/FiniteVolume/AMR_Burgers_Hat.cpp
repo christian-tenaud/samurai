@@ -1,6 +1,5 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <fmt/format.h>
 #include <iostream>
@@ -55,6 +54,7 @@ auto init_solution(Mesh& mesh)
 template <class Field, class Tag>
 void AMR_criteria(const Field& f, Tag& tag)
 {
+    using namespace samurai::math;
     auto mesh             = f.mesh();
     using mesh_id_t       = typename Field::mesh_t::mesh_id_t;
     std::size_t min_level = mesh.min_level();
@@ -64,17 +64,17 @@ void AMR_criteria(const Field& f, Tag& tag)
 
     for (std::size_t level = min_level; level <= max_level; ++level)
     {
-        const double dx = samurai::cell_length(level);
+        const double dx = mesh.cell_length(level);
 
         samurai::for_each_interval(
             mesh[mesh_id_t::cells][level],
             [&](std::size_t, auto& i, auto)
             {
-                auto der_approx     = xt::eval(xt::abs((f(level, i + 1) - f(level, i - 1)) / (2. * dx)));
-                auto der_der_approx = xt::eval(xt::abs((f(level, i + 1) - 2. * f(level, i) + f(level, i - 1)) / (dx * dx)));
+                auto der_approx     = samurai::eval(abs((f(level, i + 1) - f(level, i - 1)) / (2. * dx)));
+                auto der_der_approx = samurai::eval(abs((f(level, i + 1) - 2. * f(level, i) + f(level, i - 1)) / (dx * dx)));
 
-                auto der_plus  = xt::eval(xt::abs((f(level, i + 1) - f(level, i)) / (dx)));
-                auto der_minus = xt::eval(xt::abs((f(level, i) - f(level, i - 1)) / (dx)));
+                auto der_plus  = samurai::eval(abs((f(level, i + 1) - f(level, i)) / (dx)));
+                auto der_minus = samurai::eval(abs((f(level, i) - f(level, i - 1)) / (dx)));
 
                 // auto mask = xt::abs(f(level, i)) > 0.001;
                 auto mask = der_approx > 0.01;
@@ -83,8 +83,18 @@ void AMR_criteria(const Field& f, Tag& tag)
 
                 if (level == max_level)
                 {
-                    xt::masked_view(tag(level, i), mask)  = static_cast<int>(samurai::CellFlag::keep);
-                    xt::masked_view(tag(level, i), !mask) = static_cast<int>(samurai::CellFlag::coarsen);
+                    samurai::apply_on_masked(tag(level, i),
+                                             mask,
+                                             [](auto& e)
+                                             {
+                                                 e = static_cast<int>(samurai::CellFlag::keep);
+                                             });
+                    samurai::apply_on_masked(tag(level, i),
+                                             !mask,
+                                             [](auto& e)
+                                             {
+                                                 e = static_cast<int>(samurai::CellFlag::coarsen);
+                                             });
                 }
                 else
                 {
@@ -94,8 +104,18 @@ void AMR_criteria(const Field& f, Tag& tag)
                     }
                     else
                     {
-                        xt::masked_view(tag(level, i), mask)  = static_cast<int>(samurai::CellFlag::refine);
-                        xt::masked_view(tag(level, i), !mask) = static_cast<int>(samurai::CellFlag::coarsen);
+                        samurai::apply_on_masked(tag(level, i),
+                                                 mask,
+                                                 [](auto& e)
+                                                 {
+                                                     e = static_cast<int>(samurai::CellFlag::refine);
+                                                 });
+                        samurai::apply_on_masked(tag(level, i),
+                                                 !mask,
+                                                 [](auto& e)
+                                                 {
+                                                     e = static_cast<int>(samurai::CellFlag::coarsen);
+                                                 });
                     }
                 }
             });
@@ -134,11 +154,11 @@ void flux_correction(Field& phi_np1, const Field& phi_n, double dt)
     const std::size_t min_level = mesh[mesh_id_t::cells].min_level();
     const std::size_t max_level = mesh[mesh_id_t::cells].max_level();
 
-    const double dx = 1. / (1 << max_level);
+    const double dx = mesh.cell_length(max_level);
 
     for (std::size_t level = min_level; level < max_level; ++level)
     {
-        const double dx_loc = samurai::cell_length(level);
+        const double dx_loc = mesh.cell_length(level);
         xt::xtensor_fixed<int, xt::xshape<1>> stencil;
 
         stencil           = {-1};
@@ -173,7 +193,7 @@ void flux_correction(Field& phi_np1, const Field& phi_n, double dt)
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("Finite volume example for the Burgers equation in 2d using AMR", argc, argv);
 
     constexpr std::size_t dim = 1; // cppcheck-suppress unreadVariable
     using Config              = samurai::amr::Config<dim>;
@@ -185,9 +205,9 @@ int main(int argc, char* argv[])
     double cfl       = 0.99;
 
     // AMR parameters
-    std::size_t start_level = 6;
-    std::size_t min_level   = 1;
-    std::size_t max_level   = 6;
+    std::size_t start_level = 7;
+    std::size_t min_level   = 2;
+    std::size_t max_level   = 7;
     bool correction         = false;
 
     // Output parameters
@@ -195,7 +215,6 @@ int main(int argc, char* argv[])
     std::string filename = "FV_AMR_Burgers_Hat_1d";
     std::size_t nfiles   = 1;
 
-    CLI::App app{"Finite volume example for the Burgers equation in 2d using AMR"};
     app.add_option("--left", left_box, "The left border of the box")->capture_default_str()->group("Simulation parameters");
     app.add_option("--right", right_box, "The right border of the box")->capture_default_str()->group("Simulation parameters");
     app.add_option("--cfl", cfl, "The CFL")->capture_default_str()->group("Simulation parameters");
@@ -206,10 +225,10 @@ int main(int argc, char* argv[])
     app.add_option("--with-correction", correction, "Apply flux correction at the interface of two refinement levels")
         ->capture_default_str()
         ->group("AMR parameters");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Ouput");
-    CLI11_PARSE(app, argc, argv);
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Output");
+    SAMURAI_PARSE(argc, argv);
 
     const samurai::Box<double, dim> box({left_box}, {right_box});
     samurai::amr::Mesh<Config> mesh(box, start_level, min_level, max_level);
@@ -222,7 +241,7 @@ int main(int argc, char* argv[])
     auto tag = samurai::make_field<int, 1>("tag", mesh);
     const xt::xtensor_fixed<int, xt::xshape<2, 1>> stencil_grad{{1}, {-1}};
 
-    const double dx      = 1. / (1 << max_level);
+    const double dx      = mesh.cell_length(max_level);
     double dt            = 0.99 * dx;
     const double dt_save = Tf / static_cast<double>(nfiles);
     double t             = 0.;

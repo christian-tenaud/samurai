@@ -44,9 +44,6 @@ namespace samurai
         template <class Func>
         void operator()(Func&& func);
 
-        template <class Func>
-        void apply_interval_index(Func&& func);
-
         template <class... Op>
         void apply_op(Op&&... op);
 
@@ -68,42 +65,7 @@ namespace samurai
 
         bool is_empty() const;
 
-        void get_interval_index(std::vector<std::size_t>& index) const;
-
       private:
-
-        template <std::size_t... I>
-        void init_impl(std::size_t ref_level, std::index_sequence<I...>);
-
-        template <std::size_t... I>
-        bool eval_impl(coord_index_t scan, std::size_t d, std::index_sequence<I...>) const;
-
-        template <std::size_t... I>
-        void update_impl(coord_index_t scan, coord_index_t sentinel, std::index_sequence<I...>);
-
-        template <std::size_t... I>
-        void reset_impl(std::index_sequence<I...>);
-
-        template <std::size_t... I>
-        void decrement_dim_impl(coord_index_t i, std::index_sequence<I...>);
-
-        template <std::size_t... I>
-        void increment_dim_impl(std::index_sequence<I...>);
-
-        template <std::size_t... I>
-        coord_index_t min_impl(std::index_sequence<I...>) const;
-
-        template <std::size_t... I>
-        coord_index_t max_impl(std::index_sequence<I...>) const;
-
-        template <std::size_t... I>
-        std::size_t common_level_impl(std::index_sequence<I...>) const;
-
-        template <std::size_t... I>
-        bool is_empty_impl(std::index_sequence<I...>) const;
-
-        template <std::size_t... I>
-        void set_shift_impl(std::index_sequence<I...>, std::size_t ref_level, std::size_t common_level);
 
         template <class Func, std::size_t d>
         void sub_apply(Func&& func, std::integral_constant<std::size_t, d>);
@@ -113,9 +75,6 @@ namespace samurai
 
         template <class Func, std::size_t d>
         void apply(Func&& func, std::integral_constant<std::size_t, d>);
-
-        template <std::size_t... I>
-        void get_interval_index_impl(std::vector<std::size_t>& index, std::index_sequence<I...>) const;
 
         //! The sets of the function defining the subset.
         tuple_type m_e;
@@ -157,29 +116,7 @@ namespace samurai
     inline void subset_operator<F, CT...>::operator()(Func&& func)
     {
         reset();
-        auto func_hack = [&](auto& interval, auto& index, auto&)
-        {
-            std::forward<Func>(func)(interval, index);
-        };
-
-        apply(func_hack, std::integral_constant<std::size_t, dim - 1>{});
-    }
-
-    /**
-     * Apply a function on the subset
-     * @param func function to apply on each element of the subset
-     */
-    template <class F, class... CT>
-    template <class Func>
-    inline void subset_operator<F, CT...>::apply_interval_index(Func&& func)
-    {
-        reset();
-        auto func_hack = [&](auto&, auto&, auto& interval_index)
-        {
-            std::forward<Func>(func)(interval_index);
-        };
-
-        apply(func_hack, std::integral_constant<std::size_t, dim - 1>{});
+        apply(std::forward<Func>(func), std::integral_constant<std::size_t, dim - 1>{});
     }
 
     /**
@@ -192,9 +129,9 @@ namespace samurai
     inline void subset_operator<F, CT...>::apply_op(Op&&... op)
     {
         reset();
-        auto func = [&](auto& interval, auto& index, auto&)
+        auto func = [&](auto& interval, auto& index)
         {
-            (void)std::initializer_list<int>{(op(m_ref_level, interval, index), 0)...};
+            (op(m_ref_level, interval, index), ...);
         };
         apply(func, std::integral_constant<std::size_t, dim - 1>{});
     }
@@ -219,15 +156,14 @@ namespace samurai
     template <class F, class... CT>
     inline void subset_operator<F, CT...>::init(std::size_t ref_level)
     {
-        m_ref_level = ref_level;
-        init_impl(ref_level, std::make_index_sequence<sizeof...(CT)>());
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline void subset_operator<F, CT...>::init_impl(std::size_t ref_level, std::index_sequence<I...>)
-    {
-        (void)std::initializer_list<int>{(std::get<I>(m_e).set_shift(ref_level, common_level()), 0)...};
+        m_ref_level    = ref_level;
+        auto com_level = common_level();
+        std::apply(
+            [ref_level, com_level](auto&&... args)
+            {
+                (args.set_shift(ref_level, com_level), ...);
+            },
+            m_e);
     }
 
     /**
@@ -238,7 +174,12 @@ namespace samurai
     template <class F, class... CT>
     inline bool subset_operator<F, CT...>::eval(coord_index_t scan, std::size_t d) const
     {
-        return eval_impl(scan, d, std::make_index_sequence<sizeof...(CT)>());
+        return std::apply(
+            [scan, d, this](auto&&... args)
+            {
+                return m_functor(d, args.eval(scan, d)...);
+            },
+            m_e);
     }
 
     /**
@@ -249,7 +190,12 @@ namespace samurai
     template <class F, class... CT>
     inline void subset_operator<F, CT...>::update(coord_index_t scan, coord_index_t sentinel)
     {
-        return update_impl(scan, sentinel, std::make_index_sequence<sizeof...(CT)>());
+        std::apply(
+            [scan, sentinel](auto&&... args)
+            {
+                (args.update(scan, sentinel), ...);
+            },
+            m_e);
     }
 
     /**
@@ -258,7 +204,12 @@ namespace samurai
     template <class F, class... CT>
     inline void subset_operator<F, CT...>::reset()
     {
-        return reset_impl(std::make_index_sequence<sizeof...(CT)>());
+        std::apply(
+            [](auto&&... args)
+            {
+                (args.reset(), ...);
+            },
+            m_e);
     }
 
     /**
@@ -273,7 +224,12 @@ namespace samurai
     template <class F, class... CT>
     inline bool subset_operator<F, CT...>::is_empty() const
     {
-        return is_empty_impl(std::make_index_sequence<sizeof...(CT)>());
+        return std::apply(
+            [this](auto&&... args)
+            {
+                return m_functor.is_empty(args.is_empty()...);
+            },
+            m_e);
     }
 
     /**
@@ -284,7 +240,12 @@ namespace samurai
     template <class F, class... CT>
     inline void subset_operator<F, CT...>::decrement_dim(coord_index_t i)
     {
-        return decrement_dim_impl(i, std::make_index_sequence<sizeof...(CT)>());
+        std::apply(
+            [i](auto&&... args)
+            {
+                (args.decrement_dim(i), ...);
+            },
+            m_e);
     }
 
     /**
@@ -293,7 +254,12 @@ namespace samurai
     template <class F, class... CT>
     inline void subset_operator<F, CT...>::increment_dim()
     {
-        return increment_dim_impl(std::make_index_sequence<sizeof...(CT)>());
+        std::apply(
+            [](auto&&... args)
+            {
+                (args.increment_dim(), ...);
+            },
+            m_e);
     }
 
     /**
@@ -303,7 +269,12 @@ namespace samurai
     template <class F, class... CT>
     inline auto subset_operator<F, CT...>::min() const -> coord_index_t
     {
-        return min_impl(std::make_index_sequence<sizeof...(CT)>());
+        return std::apply(
+            [](auto&&... args)
+            {
+                return detail::do_min(args.min()...);
+            },
+            m_e);
     }
 
     /**
@@ -313,7 +284,12 @@ namespace samurai
     template <class F, class... CT>
     inline auto subset_operator<F, CT...>::max() const -> coord_index_t
     {
-        return max_impl(std::make_index_sequence<sizeof...(CT)>());
+        return std::apply(
+            [](auto&&... args)
+            {
+                return detail::do_max(args.max()...);
+            },
+            m_e);
     }
 
     /**
@@ -323,7 +299,12 @@ namespace samurai
     template <class F, class... CT>
     inline std::size_t subset_operator<F, CT...>::common_level() const
     {
-        return common_level_impl(std::make_index_sequence<sizeof...(CT)>());
+        return std::apply(
+            [](auto&&... args)
+            {
+                return detail::do_max(args.common_level()...);
+            },
+            m_e);
     }
 
     /**
@@ -342,7 +323,12 @@ namespace samurai
     template <class F, class... CT>
     inline void subset_operator<F, CT...>::set_shift(std::size_t ref_level, std::size_t common_level)
     {
-        set_shift_impl(std::make_index_sequence<sizeof...(CT)>(), ref_level, common_level);
+        std::apply(
+            [ref_level, common_level](auto&&... args)
+            {
+                (args.set_shift(ref_level, common_level), ...);
+            },
+            m_e);
     }
 
     /**
@@ -372,11 +358,6 @@ namespace samurai
     template <class Func>
     inline void subset_operator<F, CT...>::sub_apply(Func&& func, std::integral_constant<std::size_t, 0>)
     {
-        std::vector<std::size_t> index;
-        // Store into index the intervals of each node that are
-        // in the subset.
-        get_interval_index(index);
-
         // If the ref_level <= to common_level then the result
         // is a projection to a lower level which means that the result
         // is already at the right level and we can call func on it.
@@ -385,7 +366,7 @@ namespace samurai
         // result on the ref_level before calling func on it.
         if (m_ref_level <= common_level())
         {
-            func(m_result[0], m_index_yz, index);
+            func(m_result[0], m_index_yz);
         }
         else
         {
@@ -402,7 +383,7 @@ namespace samurai
                                         [&](auto stencil)
                                         {
                                             auto index_yz = xt::eval(shift_index_yz + stencil);
-                                            func(shift_result[0], index_yz, index);
+                                            func(shift_result[0], index_yz);
                                         });
         }
     }
@@ -478,89 +459,6 @@ namespace samurai
             update(scan, sentinel);
             scan = min();
         }
-    }
-
-    template <class F, class... CT>
-    inline void subset_operator<F, CT...>::get_interval_index(std::vector<std::size_t>& index) const
-    {
-        return get_interval_index_impl(index, std::make_index_sequence<sizeof...(CT)>());
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline bool subset_operator<F, CT...>::eval_impl(coord_index_t scan, std::size_t d, std::index_sequence<I...>) const
-    {
-        return m_functor(d, std::get<I>(m_e).eval(scan, d)...);
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline bool subset_operator<F, CT...>::is_empty_impl(std::index_sequence<I...>) const
-    {
-        return m_functor.is_empty(std::get<I>(m_e).is_empty()...);
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline void subset_operator<F, CT...>::update_impl(coord_index_t scan, coord_index_t sentinel, std::index_sequence<I...>)
-    {
-        (void)std::initializer_list<int>{(std::get<I>(m_e).update(scan, sentinel), 0)...};
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline void subset_operator<F, CT...>::reset_impl(std::index_sequence<I...>)
-    {
-        (void)std::initializer_list<int>{(std::get<I>(m_e).reset(), 0)...};
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline void subset_operator<F, CT...>::decrement_dim_impl(coord_index_t i, std::index_sequence<I...>)
-    {
-        (void)std::initializer_list<int>{(std::get<I>(m_e).decrement_dim(i), 0)...};
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline void subset_operator<F, CT...>::increment_dim_impl(std::index_sequence<I...>)
-    {
-        (void)std::initializer_list<int>{(std::get<I>(m_e).increment_dim(), 0)...};
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline auto subset_operator<F, CT...>::min_impl(std::index_sequence<I...>) const -> coord_index_t
-    {
-        return detail::do_min(std::get<I>(m_e).min()...);
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline auto subset_operator<F, CT...>::max_impl(std::index_sequence<I...>) const -> coord_index_t
-    {
-        return detail::do_max(std::get<I>(m_e).max()...);
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline std::size_t subset_operator<F, CT...>::common_level_impl(std::index_sequence<I...>) const
-    {
-        return detail::do_max(std::get<I>(m_e).common_level()...);
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline void subset_operator<F, CT...>::set_shift_impl(std::index_sequence<I...>, std::size_t ref_level, std::size_t common_level)
-    {
-        (void)std::initializer_list<int>{(std::get<I>(m_e).set_shift(ref_level, common_level), 0)...};
-    }
-
-    template <class F, class... CT>
-    template <std::size_t... I>
-    inline void subset_operator<F, CT...>::get_interval_index_impl(std::vector<std::size_t>& index, std::index_sequence<I...>) const
-    {
-        (void)std::initializer_list<int>{(std::get<I>(m_e).get_interval_index(index), 0)...};
     }
 
     template <class D>

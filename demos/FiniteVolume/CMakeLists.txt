@@ -2,6 +2,7 @@ include(FindPkgConfig)
 pkg_check_modules(PETSC PETSc)
 
 if(PETSC_FOUND)
+    include_directories(${PETSC_INCLUDE_DIRS})
     find_package(MPI)
 
     add_executable(finite-volume-heat heat.cpp)
@@ -12,9 +13,6 @@ if(PETSC_FOUND)
 
     add_executable(finite-volume-heat-nonlinear heat_nonlinear.cpp)
     target_link_libraries(finite-volume-heat-nonlinear samurai CLI11::CLI11 ${PETSC_LIBRARIES} ${MPI_LIBRARIES})
-
-    add_executable(finite-volume-linear-convection linear_convection.cpp)
-    target_link_libraries(finite-volume-linear-convection samurai CLI11::CLI11 ${PETSC_LINK_LIBRARIES} ${MPI_LIBRARIES})
 
     add_executable(finite-volume-stokes-2d stokes_2d.cpp)
     target_link_libraries(finite-volume-stokes-2d samurai CLI11::CLI11 ${PETSC_LINK_LIBRARIES} ${MPI_LIBRARIES})
@@ -55,14 +53,22 @@ target_link_libraries(finite-volume-advection-2d-user-bc samurai CLI11::CLI11)
 add_executable(finite-volume-scalar-burgers-2d scalar_burgers_2d.cpp)
 target_link_libraries(finite-volume-scalar-burgers-2d samurai CLI11::CLI11)
 
+add_executable(finite-volume-linear-convection linear_convection.cpp)
+target_link_libraries(finite-volume-linear-convection samurai CLI11::CLI11)
+
 add_executable(finite-volume-burgers burgers.cpp)
 target_link_libraries(finite-volume-burgers samurai CLI11::CLI11)
 
+<<<<<<< HEAD
 add_executable(Euler_2D Euler_2D.cpp)
 target_link_libraries(Euler_2D samurai CLI11::CLI11)
 
 add_executable(NS_2D NS_2D.cpp)
 target_link_libraries(NS_2D samurai CLI11::CLI11)
 
+=======
+add_executable(finite-volume-burgers-mra burgers_mra.cpp)
+target_link_libraries(finite-volume-burgers-mra samurai CLI11::CLI11)
+>>>>>>> adcb4d8029a231684a6086095a784c49c8d8c0bd
 
 # add_subdirectory(BZ)

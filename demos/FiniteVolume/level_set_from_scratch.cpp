@@ -1,6 +1,5 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <samurai/algorithm/update.hpp>
 #include <samurai/algorithm/utils.hpp>
@@ -32,7 +31,7 @@ struct fmt::formatter<SimpleID> : formatter<string_view>
 {
     // parse is inherited from formatter<string_view>.
     template <typename FormatContext>
-    auto format(SimpleID c, FormatContext& ctx)
+    auto format(SimpleID c, FormatContext& ctx) const
     {
         string_view name = "unknown";
         switch (c)
@@ -213,16 +212,20 @@ void make_graduation(Field& tag)
             mesh[SimpleID::cells][level],
             [&](std::size_t, const auto& i, const auto& index)
             {
-                auto j = index[0];
-                xt::xtensor<bool, 1> mask = (tag(level, i, j) & static_cast<int>(samurai::CellFlag::refine)); // NOLINT(misc-const-correctness)
+                auto j    = index[0];
+                auto mask = (tag(level, i, j) & static_cast<int>(samurai::CellFlag::refine)); // NOLINT(misc-const-correctness)
 
-                for (int jj = -1; jj < 2; ++jj)
-                {
-                    for (int ii = -1; ii < 2; ++ii)
-                    {
-                        xt::masked_view(tag(level, i + ii, j + jj), mask) |= static_cast<int>(samurai::CellFlag::keep);
-                    }
-                }
+                samurai::apply_on_masked(mask,
+                                         [&](auto imask)
+                                         {
+                                             for (int jj = -1; jj < 2; ++jj)
+                                             {
+                                                 for (int ii = -1; ii < 2; ++ii)
+                                                 {
+                                                     tag(level, i + ii, j + jj)(imask) |= static_cast<int>(samurai::CellFlag::keep);
+                                                 }
+                                             }
+                                         });
             });
 
         auto keep_subset = samurai::intersection(mesh[SimpleID::cells][level], mesh[SimpleID::cells][level]).on(level - 1);
@@ -232,16 +235,20 @@ void make_graduation(Field& tag)
                 auto j = index[0];
 
                 // NOLINTBEGIN(misc-const-correctness)
-                xt::xtensor<bool, 1> mask = (tag(level, 2 * i, 2 * j) & static_cast<int>(samurai::CellFlag::keep))
-                                          | (tag(level, 2 * i + 1, 2 * j) & static_cast<int>(samurai::CellFlag::keep))
-                                          | (tag(level, 2 * i, 2 * j + 1) & static_cast<int>(samurai::CellFlag::keep))
-                                          | (tag(level, 2 * i + 1, 2 * j + 1) & static_cast<int>(samurai::CellFlag::keep));
+                auto mask = (tag(level, 2 * i, 2 * j) & static_cast<int>(samurai::CellFlag::keep))
+                          | (tag(level, 2 * i + 1, 2 * j) & static_cast<int>(samurai::CellFlag::keep))
+                          | (tag(level, 2 * i, 2 * j + 1) & static_cast<int>(samurai::CellFlag::keep))
+                          | (tag(level, 2 * i + 1, 2 * j + 1) & static_cast<int>(samurai::CellFlag::keep));
                 // NOLINTEND(misc-const-correctness)
 
-                xt::masked_view(tag(level, 2 * i, 2 * j), mask) |= static_cast<int>(samurai::CellFlag::keep);
-                xt::masked_view(tag(level, 2 * i + 1, 2 * j), mask) |= static_cast<int>(samurai::CellFlag::keep);
-                xt::masked_view(tag(level, 2 * i, 2 * j + 1), mask) |= static_cast<int>(samurai::CellFlag::keep);
-                xt::masked_view(tag(level, 2 * i + 1, 2 * j + 1), mask) |= static_cast<int>(samurai::CellFlag::keep);
+                samurai::apply_on_masked(mask,
+                                         [&](auto imask)
+                                         {
+                                             tag(level, 2 * i, 2 * j)(imask) |= static_cast<int>(samurai::CellFlag::keep);
+                                             tag(level, 2 * i + 1, 2 * j)(imask) |= static_cast<int>(samurai::CellFlag::keep);
+                                             tag(level, 2 * i, 2 * j + 1)(imask) |= static_cast<int>(samurai::CellFlag::keep);
+                                             tag(level, 2 * i + 1, 2 * j + 1)(imask) |= static_cast<int>(samurai::CellFlag::keep);
+                                         });
             });
 
         xt::xtensor_fixed<int, xt::xshape<4, Field::dim>> stencil{
@@ -266,25 +273,45 @@ void make_graduation(Field& tag)
 
                     if (i_f.is_valid())
                     {
-                        auto mask = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::refine);
-                        auto i_c  = i_f >> 1;
-                        auto j_c  = j_f >> 1;
-                        xt::masked_view(tag(level - 1, i_c, j_c), mask) |= static_cast<int>(samurai::CellFlag::refine);
+                        auto mask_refine = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::refine);
+                        auto i_c         = i_f >> 1;
+                        auto j_c         = j_f >> 1;
+                        samurai::apply_on_masked(tag(level - 1, i_c, j_c),
+                                                 mask_refine,
+                                                 [](auto& e)
+                                                 {
+                                                     e |= static_cast<int>(samurai::CellFlag::refine);
+                                                 });
 
-                        mask = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::keep);
-                        xt::masked_view(tag(level - 1, i_c, j_c), mask) |= static_cast<int>(samurai::CellFlag::keep);
+                        auto mask_keep = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::keep);
+                        samurai::apply_on_masked(tag(level - 1, i_c, j_c),
+                                                 mask_keep,
+                                                 [](auto& e)
+                                                 {
+                                                     e |= static_cast<int>(samurai::CellFlag::keep);
+                                                 });
                     }
 
                     i_f = i.odd_elements();
                     if (i_f.is_valid())
                     {
-                        auto mask = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::refine);
-                        auto i_c  = i_f >> 1;
-                        auto j_c  = j_f >> 1;
-                        xt::masked_view(tag(level - 1, i_c, j_c), mask) |= static_cast<int>(samurai::CellFlag::refine);
+                        auto mask_refine = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::refine);
+                        auto i_c         = i_f >> 1;
+                        auto j_c         = j_f >> 1;
+                        samurai::apply_on_masked(tag(level - 1, i_c, j_c),
+                                                 mask_refine,
+                                                 [](auto& e)
+                                                 {
+                                                     e |= static_cast<int>(samurai::CellFlag::refine);
+                                                 });
 
-                        mask = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::keep);
-                        xt::masked_view(tag(level - 1, i_c, j_c), mask) |= static_cast<int>(samurai::CellFlag::keep);
+                        auto mask_keep = tag(level, i_f - s[0], j_f - s[1]) & static_cast<int>(samurai::CellFlag::keep);
+                        samurai::apply_on_masked(tag(level - 1, i_c, j_c),
+                                                 mask_keep,
+                                                 [](auto& e)
+                                                 {
+                                                     e |= static_cast<int>(samurai::CellFlag::keep);
+                                                 });
                     }
                 });
         }
@@ -301,7 +328,7 @@ void AMR_criteria(const Field& f, Tag& tag)
     samurai::for_each_cell(mesh[SimpleID::cells],
                            [&](auto cell)
                            {
-                               const double dx = 1. / (1 << (max_level));
+                               const double dx = mesh.cell_length(max_level);
 
                                if (std::abs(f[cell]) < 1.2 * 5 * std::sqrt(2.) * dx)
                                {
@@ -333,6 +360,7 @@ bool update_mesh(Field& f, Field_u& u, Tag& tag)
 {
     constexpr std::size_t dim = Field::dim;
     using mesh_t              = typename Field::mesh_t;
+    using size_type           = typename Field::size_type;
     using cl_type             = typename mesh_t::cl_type;
 
     auto& mesh = f.mesh();
@@ -342,8 +370,8 @@ bool update_mesh(Field& f, Field_u& u, Tag& tag)
     samurai::for_each_interval(mesh[SimpleID::cells],
                                [&](std::size_t level, const auto& interval, const auto& index_yz)
                                {
-                                   auto itag = interval.start + interval.index;
-                                   for (int i = interval.start; i < interval.end; ++i)
+                                   auto itag = static_cast<size_type>(interval.start + interval.index);
+                                   for (auto i = interval.start; i < interval.end; ++i)
                                    {
                                        if (tag[itag] & static_cast<int>(samurai::CellFlag::refine))
                                        {
@@ -453,7 +481,7 @@ void flux_correction(Field& phi_np1, const Field& phi_n, const Field_u& u, doubl
             [&](const auto& i, const auto& index)
             {
                 auto j          = index[0];
-                const double dx = samurai::cell_length(level);
+                const double dx = mesh.cell_length(level);
 
                 phi_np1(
                     level,
@@ -477,7 +505,7 @@ void flux_correction(Field& phi_np1, const Field& phi_n, const Field_u& u, doubl
             [&](const auto& i, const auto& index)
             {
                 auto j          = index[0];
-                const double dx = samurai::cell_length(level);
+                const double dx = mesh.cell_length(level);
 
                 phi_np1(level,
                         i,
@@ -499,7 +527,7 @@ void flux_correction(Field& phi_np1, const Field& phi_n, const Field_u& u, doubl
             [&](const auto& i, const auto& index)
             {
                 auto j          = index[0];
-                const double dx = samurai::cell_length(level);
+                const double dx = mesh.cell_length(level);
 
                 phi_np1(
                     level,
@@ -523,7 +551,7 @@ void flux_correction(Field& phi_np1, const Field& phi_n, const Field_u& u, doubl
             [&](const auto& i, const auto& index)
             {
                 auto j          = index[0];
-                const double dx = samurai::cell_length(level);
+                const double dx = mesh.cell_length(level);
 
                 phi_np1(level,
                         i,
@@ -558,7 +586,7 @@ void save(const fs::path& path, const std::string& filename, const Field& u, con
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("Finite volume example with a level set in 2d using AMR", argc, argv);
 
     constexpr size_t dim = 2;
     using Config         = AMRConfig<dim>;
@@ -580,7 +608,6 @@ int main(int argc, char* argv[])
     std::string filename = "FV_level_set_2d";
     std::size_t nfiles   = 1;
 
-    CLI::App app{"Finite volume example with a level set in 2d using AMR"};
     app.add_option("--min-corner", min_corner, "The min corner of the box")->capture_default_str()->group("Simulation parameters");
     app.add_option("--max-corner", max_corner, "The max corner of the box")->capture_default_str()->group("Simulation parameters");
     app.add_option("--cfl", cfl, "The CFL")->capture_default_str()->group("Simulation parameters");
@@ -591,15 +618,15 @@ int main(int argc, char* argv[])
     app.add_flag("--with-correction", correction, "Apply flux correction at the interface of two refinement levels")
         ->capture_default_str()
         ->group("AMR parameters");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Ouput");
-    CLI11_PARSE(app, argc, argv);
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Output");
+    SAMURAI_PARSE(argc, argv);
 
     const samurai::Box<double, dim> box(min_corner, max_corner);
     AMRMesh<Config> mesh{box, max_level, min_level, max_level};
 
-    double dt            = cfl / (1 << max_level);
+    double dt            = cfl * mesh.cell_length(max_level);
     const double dt_save = Tf / static_cast<double>(nfiles);
     double t             = 0.;
 

@@ -9,14 +9,11 @@
 #include <utility>
 #include <vector>
 
-#include <xtensor/xfixed.hpp>
-#include <xtensor/xnoalias.hpp>
-#include <xtensor/xview.hpp>
-
 #include "samurai/cell.hpp"
 #include "samurai_config.hpp"
 #include "static_algorithm.hpp"
 #include "stencil.hpp"
+#include "storage/containers.hpp"
 
 #define APPLY_AND_STENCIL_FUNCTIONS(STENCIL_SIZE)                                                                                         \
     using apply_function_##STENCIL_SIZE = std::function<void(Field&, const std::array<cell_t, STENCIL_SIZE>&, const value_t&)>;           \
@@ -87,38 +84,6 @@ namespace samurai
     template <class mesh_t, class value_t, std::size_t size, bool SOA>
     class Field;
 
-    namespace detail
-    {
-        template <class T, std::size_t size>
-        struct return_type
-        {
-            using type                       = xt::xtensor_fixed<T, xt::xshape<size>>;
-            static constexpr std::size_t dim = 2;
-        };
-
-        template <class T>
-        struct return_type<T, 1>
-        {
-            using type                       = T;
-            static constexpr std::size_t dim = 1;
-        };
-
-        template <class T, std::size_t size>
-        using return_type_t = typename return_type<T, size>::type;
-
-        template <class T, std::size_t size>
-        void fill(xt::xtensor_fixed<T, xt::xshape<size>>& data, T value)
-        {
-            data.fill(value);
-        }
-
-        template <class T>
-        void fill(T& data, T value)
-        {
-            data = value;
-        }
-    }
-
     ////////////////////////
     // BcValue definition //
     ////////////////////////
@@ -126,9 +91,9 @@ namespace samurai
     struct BcValue
     {
         static constexpr std::size_t dim = Field::dim;
-        using value_t                    = detail::return_type_t<typename Field::value_type, Field::size>;
+        using value_t                    = CollapsArray<typename Field::value_type, Field::size, Field::is_soa>;
         using coords_t                   = xt::xtensor_fixed<double, xt::xshape<dim>>;
-        using direction_t                = xt::xtensor_fixed<int, xt::xshape<dim>>;
+        using direction_t                = DirectionVector<dim>;
         using cell_t                     = typename Field::cell_t;
 
         virtual ~BcValue()                 = default;
@@ -208,7 +173,7 @@ namespace samurai
     template <class Field>
     ConstantBc<Field>::ConstantBc()
     {
-        detail::fill(m_v, typename Field::value_type{0});
+        fill(m_v, typename Field::value_type{0});
     }
 
     template <class Field>
@@ -259,7 +224,7 @@ namespace samurai
     template <std::size_t dim, class TInterval>
     struct BcRegion
     {
-        using direction_t = xt::xtensor_fixed<int, xt::xshape<dim>>;
+        using direction_t = DirectionVector<dim>;
         using lca_t       = LevelCellArray<dim, TInterval>;
         using region_t    = std::pair<std::vector<direction_t>, std::vector<lca_t>>;
 
@@ -413,6 +378,7 @@ namespace samurai
     template <std::size_t dim, class TInterval, std::size_t nd>
     inline auto OnDirection<dim, TInterval, nd>::get_region(const lca_t& domain) const -> region_t
     {
+        using namespace math;
         std::vector<direction_t> dir;
         std::vector<lca_t> lca;
 
@@ -468,13 +434,43 @@ namespace samurai
         return std::make_unique<CoordsRegion>(m_func);
     }
 
-    // TODO: must be implemented
     template <std::size_t dim, class TInterval>
-    inline auto CoordsRegion<dim, TInterval>::get_region(const lca_t&) const -> region_t
+    inline auto CoordsRegion<dim, TInterval>::get_region(const lca_t& domain) const -> region_t
     {
-        std::cerr << "CoordsRegion::get_region() not implemented" << std::endl;
-        assert(false && "To be implemented");
-        return std::make_pair(std::vector<direction_t>(), std::vector<lca_t>());
+        using lcl_t = LevelCellList<dim, TInterval>;
+
+        std::vector<direction_t> dir;
+        std::vector<lca_t> lca;
+
+        static_nested_loop<dim, -1, 2>(
+            [&](auto& dir_vector)
+            {
+                int number_of_one = xt::sum(xt::abs(dir_vector))[0];
+
+                if (number_of_one == 1)
+                {
+                    auto bdry_dir = difference(domain, translate(domain, -dir_vector));
+
+                    lcl_t cell_list(domain.level());
+
+                    for_each_cell(domain,
+                                  bdry_dir,
+                                  [&](auto& cell)
+                                  {
+                                      if (m_func(cell.face_center(dir_vector)))
+                                      {
+                                          cell_list.add_cell(cell);
+                                      }
+                                  });
+
+                    if (!cell_list.empty())
+                    {
+                        dir.emplace_back(dir_vector);
+                        lca.emplace_back(cell_list);
+                    }
+                }
+            });
+        return std::make_pair(dir, lca);
     }
 
     // SetRegion
@@ -512,31 +508,37 @@ namespace samurai
     // BcRegion helper functions //
     ///////////////////////////////
     template <std::size_t dim, class TInterval, class F, class... CT>
-    auto make_region(subset_operator<F, CT...> region)
+    auto make_bc_region(subset_operator<F, CT...> region)
     {
         return SetRegion<dim, TInterval, subset_operator<F, CT...>>(region);
     }
 
-    template <std::size_t dim, class TInterval, class Func>
-    auto make_region(Func&& func)
+    template <std::size_t dim, class TInterval>
+    auto make_bc_region(const typename CoordsRegion<dim, TInterval>::function_t& func)
     {
-        return CoordsRegion<dim, TInterval>(std::forward<Func>(func));
+        return CoordsRegion<dim, TInterval>(func);
+    }
+
+    template <class Mesh>
+    auto make_bc_region(const Mesh&, const typename CoordsRegion<Mesh::dim, typename Mesh::interval_t>::function_t& func)
+    {
+        return CoordsRegion<Mesh::dim, typename Mesh::interval_t>(func);
     }
 
     template <std::size_t dim, class TInterval>
-    auto make_region(Everywhere<dim, TInterval>)
+    auto make_bc_region(Everywhere<dim, TInterval>)
     {
         return Everywhere<dim, TInterval>();
     }
 
     template <std::size_t dim, class TInterval, std::size_t nd>
-    auto make_region(const std::array<xt::xtensor_fixed<int, xt::xshape<dim>>, nd>& d)
+    auto make_bc_region(const std::array<xt::xtensor_fixed<int, xt::xshape<dim>>, nd>& d)
     {
         return OnDirection<dim, TInterval, nd>(d);
     }
 
     template <std::size_t dim, class TInterval, class... dir_t>
-    auto make_region(const dir_t&... d)
+    auto make_bc_region(const dir_t&... d)
     {
         constexpr std::size_t nd = sizeof...(dir_t);
         using final_type         = OnDirection<dim, TInterval, nd>;
@@ -545,7 +547,7 @@ namespace samurai
     }
 
     template <std::size_t dim, class TInterval>
-    auto make_region(const xt::xtensor_fixed<int, xt::xshape<dim>>& d)
+    auto make_bc_region(const xt::xtensor_fixed<int, xt::xshape<dim>>& d)
     {
         return OnDirection<dim, TInterval, 1>({d});
     }
@@ -618,7 +620,7 @@ namespace samurai
         bcvalue_impl p_bcvalue;
         const lca_t& m_domain; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
         region_t m_region;
-        xt::xtensor<typename Field::value_type, detail::return_type<typename Field::value_type, size>::dim> m_value;
+        // xt::xtensor<typename Field::value_type, detail::return_type<typename Field::value_type, size>::dim> m_value;
     };
 
     ///////////////////
@@ -673,7 +675,14 @@ namespace samurai
     template <class Region>
     inline auto Bc<Field>::on(const Region& region)
     {
-        m_region = make_region<dim, interval_t>(region).get_region(m_domain);
+        if constexpr (std::is_base_of_v<BcRegion<dim, interval_t>, Region>)
+        {
+            m_region = region.get_region(m_domain);
+        }
+        else
+        {
+            m_region = make_bc_region<dim, interval_t>(region).get_region(m_domain);
+        }
         return this;
     }
 
@@ -681,7 +690,7 @@ namespace samurai
     template <class... Regions>
     inline auto Bc<Field>::on(const Regions&... regions)
     {
-        m_region = make_region<dim, interval_t>(regions...).get_region(m_domain);
+        m_region = make_bc_region<dim, interval_t>(regions...).get_region(m_domain);
         return this;
     }
 
@@ -807,8 +816,11 @@ namespace samurai
     // BC Types //
     //////////////
     template <class Field, class Subset, std::size_t stencil_size, class Vector>
-    void
-    __apply_bc_on_subset(Bc<Field>& bc, Field& field, Subset& subset, const Stencil<stencil_size, Field::dim>& stencil, const Vector& direction)
+    void __apply_bc_on_subset(Bc<Field>& bc,
+                              Field& field,
+                              Subset& subset,
+                              const StencilAnalyzer<stencil_size, Field::dim>& stencil,
+                              const Vector& direction)
     {
         auto apply_bc = bc.get_apply_function(std::integral_constant<std::size_t, stencil_size>(), direction);
         if (bc.get_value_type() == BCVType::constant)
@@ -824,14 +836,13 @@ namespace samurai
         }
         else if (bc.get_value_type() == BCVType::function)
         {
-            int origin_index = find_stencil_origin(stencil);
-            assert(origin_index >= 0);
+            assert(stencil.has_origin);
             for_each_stencil(field.mesh(),
                              subset,
                              stencil,
-                             [&, origin_index](auto& cells)
+                             [&](auto& cells)
                              {
-                                 auto& cell_in    = cells[static_cast<std::size_t>(origin_index)];
+                                 auto& cell_in    = cells[stencil.origin_index];
                                  auto face_coords = cell_in.face_center(direction);
                                  auto value       = bc.value(direction, cell_in, face_coords);
                                  apply_bc(field, cells, value);
@@ -875,19 +886,26 @@ namespace samurai
 
                 if (is_cartesian_direction)
                 {
-                    auto stencil = convert_for_direction(stencil_0, direction[d]);
+                    auto stencil          = convert_for_direction(stencil_0, direction[d]);
+                    auto stencil_analyzer = make_stencil_analyzer(stencil);
 
                     // 1. Inner cells in the boundary region
                     auto bdry_cells = intersection(mesh[mesh_id_t::cells][level], lca[d]).on(level);
+                    if (level >= mesh.min_level()) // otherwise there is no cells
+                    {
+                        __apply_bc_on_subset(bc, field, bdry_cells, stencil_analyzer, direction[d]);
+                    }
 
-                    __apply_bc_on_subset(bc, field, bdry_cells, stencil, direction[d]);
+                    // 2. Inner ghosts in the boundary region that have a neighbouring ghost outside the domain
+                    if (mesh.min_level() != mesh.max_level())
+                    {
+                        auto translated_outer_nghbr = translate(mesh[mesh_id_t::reference][level], -(stencil_size / 2) * direction[d]);
+                        auto potential_inner_cells_and_ghosts = intersection(translated_outer_nghbr, lca[d]);
+                        auto inner_cells_and_ghosts = intersection(potential_inner_cells_and_ghosts, mesh[mesh_id_t::reference][level]).on(level);
+                        auto inner_ghosts_with_outer_nghbr = difference(inner_cells_and_ghosts, bdry_cells).on(level);
 
-                    // 2. Inner ghosts in the boundary region that have a neigbouring ghost outside the domain
-                    auto translated_outer_nghbr        = translate(mesh[mesh_id_t::reference][level], -(stencil_size / 2) * direction[d]);
-                    auto inner_cells_and_ghosts        = intersection(translated_outer_nghbr, lca[d]);
-                    auto inner_ghosts_with_outer_nghbr = difference(inner_cells_and_ghosts, bdry_cells).on(level);
-
-                    __apply_bc_on_subset(bc, field, inner_ghosts_with_outer_nghbr, stencil, direction[d]);
+                        __apply_bc_on_subset(bc, field, inner_ghosts_with_outer_nghbr, stencil_analyzer, direction[d]);
+                    }
                 }
             }
         }
@@ -898,38 +916,42 @@ namespace samurai
                                             std::size_t level,
                                             Field& field,
                                             const DirectionVector<Field::dim>& direction,
-                                            Subset& subset)
+                                            Subset& subset,
+                                            bool only_fill_ghost_neighbours)
     {
         using mesh_id_t = typename Field::mesh_t::mesh_id_t;
 
         auto& mesh = field.mesh();
 
-        auto stencil_0 = bc.get_stencil(std::integral_constant<std::size_t, stencil_size>());
-        auto stencil   = convert_for_direction(stencil_0, direction);
+        auto stencil_0        = bc.get_stencil(std::integral_constant<std::size_t, stencil_size>());
+        auto stencil          = convert_for_direction(stencil_0, direction);
+        auto stencil_analyzer = make_stencil_analyzer(stencil);
 
         // 1. Inner cells in the boundary region
+        if (!only_fill_ghost_neighbours && level >= mesh.min_level())
         {
             auto bdry_cells = intersection(mesh[mesh_id_t::cells][level], subset);
             // We need to check that the furthest ghost exists. It's not always the case for large stencils!
             auto translated_outer_nghbr = translate(mesh[mesh_id_t::reference][level], -(stencil_size / 2) * direction);
             auto cells                  = intersection(translated_outer_nghbr, bdry_cells).on(level);
 
-            __apply_bc_on_subset(bc, field, cells, stencil, direction);
+            __apply_bc_on_subset(bc, field, cells, stencil_analyzer, direction);
         }
 
-        // 2. Inner ghosts in the boundary region that have a neigbouring ghost outside the domain
+        // 2. Inner ghosts in the boundary region that have a neighbouring ghost outside the domain
         {
-            auto bdry_cells                    = intersection(mesh[mesh_id_t::cells][level], subset);
-            auto translated_outer_nghbr        = translate(mesh[mesh_id_t::reference][level], -(stencil_size / 2) * direction);
-            auto inner_cells_and_ghosts        = intersection(translated_outer_nghbr, subset).on(level);
+            auto bdry_cells                       = intersection(mesh[mesh_id_t::cells][level], subset);
+            auto translated_outer_nghbr           = translate(mesh[mesh_id_t::reference][level], -(stencil_size / 2) * direction);
+            auto potential_inner_cells_and_ghosts = intersection(translated_outer_nghbr, subset).on(level);
+            auto inner_cells_and_ghosts = intersection(potential_inner_cells_and_ghosts, mesh[mesh_id_t::reference][level]).on(level);
             auto inner_ghosts_with_outer_nghbr = difference(inner_cells_and_ghosts, bdry_cells).on(level);
 
-            __apply_bc_on_subset(bc, field, inner_ghosts_with_outer_nghbr, stencil, direction);
+            __apply_bc_on_subset(bc, field, inner_ghosts_with_outer_nghbr, stencil_analyzer, direction);
         }
     }
 
     template <class Field, std::size_t stencil_size>
-    void apply_extrapolation_bc_impl(Bc<Field>& bc, std::size_t level, Field& field, bool diagonals_only)
+    void apply_extrapolation_bc_impl(Bc<Field>& bc, std::size_t level, Field& field, bool diagonals_only, bool only_fill_ghost_neighbours)
     {
         static constexpr std::size_t dim = Field::dim;
 
@@ -963,7 +985,7 @@ namespace samurai
                             if (is_cartesian_direction)
                             {
                                 auto subset = difference(domain, translate(domain, -one_interval * dir));
-                                __apply_extrapolation_bc_on_subset<stencil_size>(bc, level, field, dir, subset);
+                                __apply_extrapolation_bc_on_subset<stencil_size>(bc, level, field, dir, subset, only_fill_ghost_neighbours);
                             }
                             else
                             {
@@ -972,7 +994,7 @@ namespace samurai
                                     auto subset = difference(domain,
                                                              union_(translate(domain, one_interval * direction_t{-dir[0], 0}),
                                                                     translate(domain, one_interval * direction_t{0, -dir[1]})));
-                                    __apply_extrapolation_bc_on_subset<stencil_size>(bc, level, field, dir, subset);
+                                    __apply_extrapolation_bc_on_subset<stencil_size>(bc, level, field, dir, subset, only_fill_ghost_neighbours);
                                 }
                                 else if constexpr (dim == 3)
                                 {
@@ -980,7 +1002,7 @@ namespace samurai
                                                              union_(translate(domain, one_interval * direction_t{-dir[0], 0, 0}),
                                                                     translate(domain, one_interval * direction_t{0, -dir[1], 0}),
                                                                     translate(domain, one_interval * direction_t{0, 0, -dir[2]})));
-                                    __apply_extrapolation_bc_on_subset<stencil_size>(bc, level, field, dir, subset);
+                                    __apply_extrapolation_bc_on_subset<stencil_size>(bc, level, field, dir, subset, only_fill_ghost_neighbours);
                                 }
                             }
                         }
@@ -1098,7 +1120,7 @@ namespace samurai
                     static constexpr std::size_t in  = 0;
                     static constexpr std::size_t out = 1;
 
-                    double dx     = cell_length(cells[out].level);
+                    double dx     = f.mesh().cell_length(cells[out].level);
                     f[cells[out]] = dx * value + f[cells[in]];
                 }
                 else
@@ -1160,7 +1182,8 @@ namespace samurai
                     {
                         if (std::isnan(field_value(u, cells[c], field_i)))
                         {
-                            std::cerr << "NaN detected when applying polynomial extrapolation on the outer ghosts: " << cells[c] << std::endl;
+                            std::cerr << "NaN detected in [" << cells[c]
+                                      << "] when applying polynomial extrapolation to fill the outer ghost [" << ghost << "]." << std::endl;
                             assert(false);
                         }
                     }
@@ -1192,36 +1215,42 @@ namespace samurai
         static constexpr std::size_t max_stencil_size_implemented_BC = Bc<Field>::max_stencil_size_implemented;
         static constexpr std::size_t max_stencil_size_implemented_PE = PolynomialExtrapolation<Field, 2>::max_stencil_size_implemented_PE;
 
+        auto& mesh = field.mesh();
+
         // Step 0:
         // One level below the boundary cells, there are outer ghosts used for prediction (for the computation of details).
         // Those ghosts are supposed (for now) to be filled by the boundary conditions.
         // However, if the B.C. stencil is larger than the prediction stencil, there are not enough ghosts to apply the B.C.
         // So, in order to make sure that the outer ghosts linked to the detail computation are filled with values,
         // we start by filling them with polynomial extrapolation.
-        // If the B.C. can, in fact, be applied, they will overwrite the polynomial extrapolation
+        // If the B.C. can, in fact, be applied, they will overwrite the polynomial extrapolation.
         if constexpr (Field::mesh_t::config::max_stencil_width > prediction_order)
         {
-            // We populate the ghosts sequentially from the closest to the farthest.
-            for (std::size_t ghost_layer = 1; ghost_layer <= prediction_order; ++ghost_layer)
+            if (mesh.min_level() != mesh.max_level())
             {
-                std::size_t stencil_s = 2 * ghost_layer;
-                static_for<2, std::min(max_stencil_size_implemented_PE, 2 * prediction_order) + 1>::apply(
-                    [&](auto integral_constant_i)
-                    {
-                        static constexpr std::size_t i = decltype(integral_constant_i)::value;
-
-                        if constexpr (i % 2 == 0) // (because PolynomialExtrapolation is only implemented for even stencil_size)
+                // We populate the ghosts sequentially from the closest to the farthest.
+                for (std::size_t ghost_layer = 1; ghost_layer <= prediction_order; ++ghost_layer)
+                {
+                    std::size_t stencil_s = 2 * ghost_layer;
+                    static_for<2, std::min(max_stencil_size_implemented_PE, 2 * prediction_order) + 1>::apply(
+                        [&](auto integral_constant_i)
                         {
-                            if (stencil_s == i)
-                            {
-                                auto& mesh = detail::get_mesh(field.mesh());
-                                PolynomialExtrapolation<Field, i> bc(mesh, ConstantBc<Field>(), true);
+                            static constexpr std::size_t i = decltype(integral_constant_i)::value;
 
-                                bool only_fill_corners = false;
-                                apply_extrapolation_bc_impl<Field, i>(bc, level, field, only_fill_corners);
+                            if constexpr (i % 2 == 0) // (because PolynomialExtrapolation is only implemented for even stencil_size)
+                            {
+                                if (stencil_s == i)
+                                {
+                                    auto& domain = detail::get_mesh(field.mesh());
+                                    PolynomialExtrapolation<Field, i> bc(domain, ConstantBc<Field>(), true);
+
+                                    bool only_fill_corners          = false;
+                                    bool only_fill_ghost_neighbours = true; // because cell neighbours will be filled by the B.C.
+                                    apply_extrapolation_bc_impl<Field, i>(bc, level, field, only_fill_corners, only_fill_ghost_neighbours);
+                                }
                             }
-                        }
-                    });
+                        });
+                }
             }
         }
 
@@ -1245,32 +1274,41 @@ namespace samurai
             real_max_stencil_size = std::max(real_max_stencil_size, bc->stencil_size());
         }
 
-        // Step 3:
-        // Polynomial extrapolation to populate corners and ghosts layers that are not filled by the B.C.
+        // Step 2:
+        // Polynomial extrapolation to populate corners and ghosts layers that are not filled by the B.C. (i.e. outside of the B.C.'s
+        // stencil)
 
-        // We populate the ghosts sequentially from the closest to the farthest.
-        for (std::size_t ghost_layer = 1; ghost_layer <= ghost_width; ++ghost_layer)
+        // if (mesh.min_level() != mesh.max_level()) // We comment this test because some schemes have a box stencil and need values in
+        //                                              external corners. However, the associated B.C. doesn't fill them, so we do it.
+        //                                              Since on a uniform mesh, the MR process doesn't need corners, it would be better
+        //                                              that the corners be filled by the user as part of the BCs.
+        //                                              But so far the users don't have an easy way to do that...
         {
-            std::size_t stencil_s = 2 * ghost_layer;
-            static_for<2, std::min(max_stencil_size_implemented_PE, 2 * ghost_width) + 1>::apply(
-                [&](auto integral_constant_i)
-                {
-                    static constexpr std::size_t i = decltype(integral_constant_i)::value;
-
-                    if constexpr (i % 2 == 0) // (because PolynomialExtrapolation is only implemented for even stencil_size)
+            // We populate the ghosts sequentially from the closest to the farthest.
+            for (std::size_t ghost_layer = 1; ghost_layer <= ghost_width; ++ghost_layer)
+            {
+                std::size_t stencil_s = 2 * ghost_layer;
+                static_for<2, std::min(max_stencil_size_implemented_PE, 2 * ghost_width) + 1>::apply(
+                    [&](auto integral_constant_i)
                     {
-                        if (stencil_s == i)
-                        {
-                            auto& mesh = detail::get_mesh(field.mesh());
-                            PolynomialExtrapolation<Field, i> bc(mesh, ConstantBc<Field>(), true);
+                        static constexpr std::size_t i = decltype(integral_constant_i)::value;
 
-                            // If the ghost layer is managed by the B.C., we only populate the corners.
-                            // Otherwise, we populate the Cartesian directions as well, by polynomial extrapolation.
-                            bool only_fill_corners = ghost_layer <= real_max_stencil_size / 2;
-                            apply_extrapolation_bc_impl<Field, i>(bc, level, field, only_fill_corners);
+                        if constexpr (i % 2 == 0) // (because PolynomialExtrapolation is only implemented for even stencil_size)
+                        {
+                            if (stencil_s == i)
+                            {
+                                auto& domain = detail::get_mesh(field.mesh());
+                                PolynomialExtrapolation<Field, i> bc(domain, ConstantBc<Field>(), true);
+
+                                // If the ghost layer is managed by the B.C., we only populate the corners.
+                                // Otherwise, we populate the Cartesian directions as well, by polynomial extrapolation.
+                                bool only_fill_corners          = ghost_layer <= real_max_stencil_size / 2;
+                                bool only_fill_ghost_neighbours = false;
+                                apply_extrapolation_bc_impl<Field, i>(bc, level, field, only_fill_corners, only_fill_ghost_neighbours);
+                            }
                         }
-                    }
-                });
+                    });
+            }
         }
     }
 

@@ -8,7 +8,7 @@ namespace samurai
     namespace petsc
     {
         template <std::size_t rows_, std::size_t cols_, class... Operators>
-        class BlockAssembly
+        class BlockAssemblyBase
         {
           public:
 
@@ -24,10 +24,10 @@ namespace samurai
 
           public:
 
-            explicit BlockAssembly(const block_operator_t& block_op)
+            explicit BlockAssemblyBase(const block_operator_t& block_op)
                 : m_block_operator(block_op)
-                , m_assembly_ops(transform(block_op.operators(),
-                                           [](const auto& op)
+                , m_assembly_ops(transform(m_block_operator.operators(),
+                                           [](auto& op)
                                            {
                                                return make_assembly(op);
                                            }))
@@ -90,6 +90,77 @@ namespace samurai
             auto& get()
             {
                 return std::get<row * cols + col>(m_assembly_ops);
+            }
+
+            void check_and_set_sizes()
+            {
+                // Check compatibility of dimensions and set dimensions for blocks that must fit into the matrix
+                // - rows:
+                for (std::size_t r = 0; r < rows; r++)
+                {
+                    PetscInt block_rows = 0;
+                    for_each_assembly_op(
+                        [&](auto& op, auto row, auto)
+                        {
+                            if (row == r)
+                            {
+                                if (block_rows == 0 && !op.fit_block_dimensions())
+                                {
+                                    block_rows = op.matrix_rows();
+                                }
+                            }
+                        });
+                    for_each_assembly_op(
+                        [&](auto& op, auto row, auto col)
+                        {
+                            if (row == r)
+                            {
+                                if (op.fit_block_dimensions())
+                                {
+                                    op.set_matrix_rows(block_rows);
+                                }
+                                else if (op.matrix_rows() != block_rows)
+                                {
+                                    std::cerr << "Assembly failure: incompatible number of rows of block (" << row << ", " << col
+                                              << "): " << op.matrix_rows() << " (expected " << block_rows << ")" << std::endl;
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                        });
+                }
+                // - cols:
+                for (std::size_t c = 0; c < cols; c++)
+                {
+                    PetscInt block_cols = 0;
+                    for_each_assembly_op(
+                        [&](auto& op, auto, auto col)
+                        {
+                            if (col == c)
+                            {
+                                if (block_cols == 0 && !op.fit_block_dimensions())
+                                {
+                                    block_cols = op.matrix_cols();
+                                }
+                            }
+                        });
+                    for_each_assembly_op(
+                        [&](auto& op, auto row, auto col)
+                        {
+                            if (col == c)
+                            {
+                                if (op.fit_block_dimensions())
+                                {
+                                    op.set_matrix_cols(block_cols);
+                                }
+                                else if (op.matrix_cols() != block_cols)
+                                {
+                                    std::cerr << "Assembly failure: incompatible number of columns of block (" << row << ", " << col
+                                              << "): " << op.matrix_cols() << " (expected " << block_cols << ")" << std::endl;
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                        });
+                }
             }
 
             template <class... Fields>
@@ -178,13 +249,18 @@ namespace samurai
             }
         };
 
+        template <bool monolithic, std::size_t rows_, std::size_t cols_, class... Operators>
+        class BlockAssembly
+        {
+        };
+
         /**
          * Assemble block matrix using PETSc nested matrices.
          */
         template <std::size_t rows_, std::size_t cols_, class... Operators>
-        class NestedBlockAssembly : public BlockAssembly<rows_, cols_, Operators...>
+        class BlockAssembly<false, rows_, cols_, Operators...> : public BlockAssemblyBase<rows_, cols_, Operators...>
         {
-            using base_class = BlockAssembly<rows_, cols_, Operators...>;
+            using base_class = BlockAssemblyBase<rows_, cols_, Operators...>;
 
           public:
 
@@ -200,7 +276,7 @@ namespace samurai
 
           public:
 
-            explicit NestedBlockAssembly(const block_operator_t& block_op)
+            explicit BlockAssembly(const block_operator_t& block_op)
                 : base_class(block_op)
             {
                 for_each_assembly_op(
@@ -212,6 +288,8 @@ namespace samurai
 
             void create_matrix(Mat& A)
             {
+                reset();
+
                 for_each_assembly_op(
                     [&](auto& op, auto row, auto col)
                     {
@@ -243,6 +321,9 @@ namespace samurai
                     {
                         op.reset();
                     });
+
+                // Check compatibility of dimensions and set dimensions for blocks that must fit into the matrix
+                this->check_and_set_sizes();
             }
 
             Mat& block(std::size_t row, std::size_t col)
@@ -350,7 +431,7 @@ namespace samurai
                 for_each(fields,
                          [&](auto& f)
                          {
-                             for_each_assembly_op(
+                             this->for_each_assembly_op(
                                  [&](auto&, auto row, auto col)
                                  {
                                      if (row == 0 && col == i)
@@ -388,10 +469,10 @@ namespace samurai
          * Assemble block matrix as a monolithic matrix.
          */
         template <std::size_t rows_, std::size_t cols_, class... Operators>
-        class MonolithicBlockAssembly : public BlockAssembly<rows_, cols_, Operators...>,
-                                        public MatrixAssembly
+        class BlockAssembly<true, rows_, cols_, Operators...> : public BlockAssemblyBase<rows_, cols_, Operators...>,
+                                                                public MatrixAssembly
         {
-            using base_class = BlockAssembly<rows_, cols_, Operators...>;
+            using base_class = BlockAssemblyBase<rows_, cols_, Operators...>;
 
           public:
 
@@ -401,7 +482,7 @@ namespace samurai
             using base_class::for_each_assembly_op;
             using base_class::rows;
 
-            explicit MonolithicBlockAssembly(const block_operator_t& block_op)
+            explicit BlockAssembly(const block_operator_t& block_op)
                 : base_class(block_op)
             {
                 this->set_name("(unnamed monolithic block operator)");
@@ -422,72 +503,7 @@ namespace samurai
                     });
 
                 // Check compatibility of dimensions and set dimensions for blocks that must fit into the matrix
-                // - rows:
-                for (std::size_t r = 0; r < rows; r++)
-                {
-                    PetscInt block_rows = 0;
-                    for_each_assembly_op(
-                        [&](auto& op, auto row, auto)
-                        {
-                            if (row == r)
-                            {
-                                if (block_rows == 0 && !op.fit_block_dimensions())
-                                {
-                                    block_rows = op.matrix_rows();
-                                }
-                            }
-                        });
-                    for_each_assembly_op(
-                        [&](auto& op, auto row, auto col)
-                        {
-                            if (row == r)
-                            {
-                                if (op.fit_block_dimensions())
-                                {
-                                    op.set_matrix_rows(block_rows);
-                                }
-                                else if (op.matrix_rows() != block_rows)
-                                {
-                                    std::cerr << "Assembly failure: incompatible number of rows of block (" << row << ", " << col
-                                              << "): " << op.matrix_rows() << " (expected " << block_rows << ")" << std::endl;
-                                    exit(EXIT_FAILURE);
-                                }
-                            }
-                        });
-                }
-                // - cols:
-                for (std::size_t c = 0; c < cols; c++)
-                {
-                    PetscInt block_cols = 0;
-                    for_each_assembly_op(
-                        [&](auto& op, auto, auto col)
-                        {
-                            if (col == c)
-                            {
-                                if (block_cols == 0 && !op.fit_block_dimensions())
-                                {
-                                    block_cols = op.matrix_cols();
-                                }
-                            }
-                        });
-                    for_each_assembly_op(
-                        [&](auto& op, auto row, auto col)
-                        {
-                            if (col == c)
-                            {
-                                if (op.fit_block_dimensions())
-                                {
-                                    op.set_matrix_cols(block_cols);
-                                }
-                                else if (op.matrix_cols() != block_cols)
-                                {
-                                    std::cerr << "Assembly failure: incompatible number of columns of block (" << row << ", " << col
-                                              << "): " << op.matrix_cols() << " (expected " << block_cols << ")" << std::endl;
-                                    exit(EXIT_FAILURE);
-                                }
-                            }
-                        });
-                }
+                this->check_and_set_sizes();
 
                 // Set row_shift and col_shift
                 PetscInt row_shift = 0;
@@ -825,19 +841,37 @@ namespace samurai
                              i++;
                          });
             }
+
+            std::array<IS, cols> create_fields_IS()
+            {
+                std::array<IS, cols> IS_array;
+                for_each_assembly_op(
+                    [&](auto& op, auto row, auto col)
+                    {
+                        if (row == 1)
+                        {
+                            std::vector<PetscInt> idx(static_cast<std::size_t>(op.matrix_cols()));
+                            for (std::size_t i = 0; i < idx.size(); ++i)
+                            {
+                                idx[i] = op.col_shift() + static_cast<PetscInt>(i);
+                            }
+                            ISCreateGeneral(PETSC_COMM_SELF, static_cast<PetscInt>(idx.size()), idx.data(), PETSC_COPY_VALUES, &IS_array[col]);
+                        }
+                    });
+                return IS_array;
+            }
         };
+
+        // template <std::size_t rows_, std::size_t cols_, class... Operators>
+        // using NestedBlockAssembly = BlockAssembly<false, rows_, cols_, Operators...>;
+
+        // template <std::size_t rows_, std::size_t cols_, class... Operators>
+        // using MonolithicBlockAssembly = BlockAssembly<true, rows_, cols_, Operators...>;
 
         template <bool monolithic, std::size_t rows_, std::size_t cols_, class... Operators>
         auto make_assembly(const BlockOperator<rows_, cols_, Operators...>& block_op)
         {
-            if constexpr (monolithic)
-            {
-                return MonolithicBlockAssembly<rows_, cols_, Operators...>(block_op);
-            }
-            else
-            {
-                return NestedBlockAssembly<rows_, cols_, Operators...>(block_op);
-            }
+            return BlockAssembly<monolithic, rows_, cols_, Operators...>(block_op);
         }
 
         template <std::size_t rows_, std::size_t cols_, class... Operators>

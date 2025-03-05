@@ -74,7 +74,12 @@ namespace samurai
                 this->set_name(scheme.name());
             }
 
-            auto& scheme() const
+            auto& scheme()
+            {
+                return m_scheme;
+            }
+
+            const auto& scheme() const
             {
                 return m_scheme;
             }
@@ -162,6 +167,7 @@ namespace samurai
             void set_unknown(field_t& unknown)
             {
                 m_unknown = &unknown;
+                m_n_cells = unknown.mesh().nb_cells();
             }
 
             auto& unknown() const
@@ -266,7 +272,7 @@ namespace samurai
 
             void sparsity_pattern_boundary(std::vector<PetscInt>& nnz) const override
             {
-                if (unknown().get_bc().empty())
+                if (cfg_t::stencil_size > 1 && unknown().get_bc().empty())
                 {
                     std::cerr << "Failure to assemble to boundary conditions in the operator '" << this->name()
                               << "': no boundary condition attached to the field '" << unknown().name() << "'." << std::endl;
@@ -370,7 +376,7 @@ namespace samurai
 
             void assemble_boundary_conditions(Mat& A) override
             {
-                if (unknown().get_bc().empty())
+                if (cfg_t::stencil_size > 1 && unknown().get_bc().empty())
                 {
                     std::cerr << "Failure to assemble to boundary conditions in the operator '" << this->name()
                               << "': no boundary condition attached to the field '" << unknown().name() << "'." << std::endl;
@@ -755,7 +761,7 @@ namespace samurai
                         mesh(),
                         [&](auto level, PetscInt ghost, const std::array<PetscInt, static_cast<std::size_t>(number_of_children)>& children)
                         {
-                            double h       = cell_length(level);
+                            double h       = mesh().cell_length(level);
                             double scaling = 1. / (h * h);
                             for (unsigned int field_i = 0; field_i < output_field_size; ++field_i)
                             {
@@ -834,7 +840,7 @@ namespace samurai
                     mesh(),
                     [&](auto& ghost)
                     {
-                        double h       = cell_length(ghost.level);
+                        double h       = mesh().cell_length(ghost.level);
                         double scaling = 1. / (h * h);
                         for (unsigned int field_i = 0; field_i < field_size; ++field_i)
                         {
@@ -899,7 +905,7 @@ namespace samurai
                     mesh(),
                     [&](auto& ghost)
                     {
-                        double h       = cell_length(ghost.level);
+                        double h       = mesh().cell_length(ghost.level);
                         double scaling = 1. / (h * h);
                         for (unsigned int field_i = 0; field_i < field_size; ++field_i)
                         {
@@ -981,7 +987,7 @@ namespace samurai
                     mesh(),
                     [&](auto& ghost)
                     {
-                        double h       = cell_length(ghost.level);
+                        double h       = mesh().cell_length(ghost.level);
                         double scaling = 1. / (h * h);
                         for (unsigned int field_i = 0; field_i < field_size; ++field_i)
                         {

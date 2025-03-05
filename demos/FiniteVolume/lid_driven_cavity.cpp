@@ -1,14 +1,11 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
 
-#include <CLI/CLI.hpp>
-
 #include <iostream>
 #include <samurai/hdf5.hpp>
 #include <samurai/mr/adapt.hpp>
 #include <samurai/mr/mesh.hpp>
 #include <samurai/petsc.hpp>
-#include <samurai/reconstruction.hpp>
 #include <samurai/samurai.hpp>
 
 template <class Solver>
@@ -42,13 +39,17 @@ void configure_saddle_point_solver(Solver& block_solver)
     KSP ksp = block_solver.Ksp();
     PC pc;
     KSPGetPC(ksp, &pc);
-    PCSetType(pc, PCFIELDSPLIT);                 // (equiv. '-pc_type fieldsplit')
+
+    block_solver.assemble_matrix(); // if nested matrix, must be called before calling set_pc_fieldsplit().
+
+    block_solver.set_pc_fieldsplit(pc);
     PCFieldSplitSetType(pc, PC_COMPOSITE_SCHUR); // Schur complement preconditioner (equiv. '-pc_fieldsplit_type schur')
     PCFieldSplitSetSchurPre(pc, PC_FIELDSPLIT_SCHUR_PRE_SELFP, PETSC_NULLPTR); // (equiv. '-pc_fieldsplit_schur_precondition selfp')
     PCFieldSplitSetSchurFactType(pc, PC_FIELDSPLIT_SCHUR_FACT_FULL);           // (equiv. '-pc_fieldsplit_schur_fact_type full')
 
     // Configure the sub-solvers
-    block_solver.setup(); // must be called before using PCFieldSplitSchurGetSubKSP(), because the matrices are needed.
+    block_solver.setup(); // KSPSetUp() or PCSetUp() must be called before calling PCFieldSplitSchurGetSubKSP(), because the matrices are
+                          // needed.
     KSP* sub_ksp;
     PCFieldSplitSchurGetSubKSP(pc, nullptr, &sub_ksp);
     KSP A_ksp     = sub_ksp[0];
@@ -86,13 +87,13 @@ void configure_solver(Solver& solver)
     }
     else
     {
-        configure_saddle_point_solver(solver);
+        configure_saddle_point_solver(solver); // works also for monolithic
     }
 }
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("Lid-driven cavity", argc, argv);
 
     constexpr std::size_t dim = 2;
     using Config              = samurai::MRConfig<dim, 2>;
@@ -127,7 +128,6 @@ int main(int argc, char* argv[])
     fs::path path        = fs::current_path();
     std::string filename = "ldc_ink";
 
-    CLI::App app{"Lid-driven cavity"};
     app.add_option("--Tf", Tf, "Final time")->capture_default_str()->group("Simulation parameters");
     app.add_option("--dt", dt, "Time step")->capture_default_str()->group("Simulation parameters");
     app.add_option("--cfl", cfl, "The CFL")->capture_default_str()->group("Simulation parameters");
@@ -139,25 +139,27 @@ int main(int argc, char* argv[])
     app.add_option("--mr-reg", mr_regularity, "The regularity criteria used by the multiresolution to adapt the mesh")
         ->capture_default_str()
         ->group("Multiresolution");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Ouput");
-    app.add_flag("--export-velocity", export_velocity, "Export velocity field")->capture_default_str()->group("Ouput");
-    app.add_flag("--export-reconstruct", export_reconstruct, "Export reconstructed fields")->capture_default_str()->group("Ouput");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--nfiles", nfiles, "Number of output files")->capture_default_str()->group("Output");
+    app.add_flag("--export-velocity", export_velocity, "Export velocity field")->capture_default_str()->group("Output");
+    app.add_flag("--export-reconstruct", export_reconstruct, "Export reconstructed fields")->capture_default_str()->group("Output");
     app.allow_extras();
-    CLI11_PARSE(app, argc, argv);
+    SAMURAI_PARSE(argc, argv);
 
     if (!fs::exists(path))
     {
         fs::create_directory(path);
     }
 
+    samurai::times::timers.start("petsc init");
     PetscInitialize(&argc, &argv, 0, nullptr);
 
     PetscMPIInt size;
     PetscCallMPI(MPI_Comm_size(PETSC_COMM_WORLD, &size));
     PetscCheck(size == 1, PETSC_COMM_WORLD, PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!");
     PetscOptionsSetValue(NULL, "-options_left", "off"); // disable warning for unused options
+    samurai::times::timers.stop("petsc init");
 
     auto box = samurai::Box<double, dim>({0, 0}, {1, 1});
 
@@ -298,7 +300,7 @@ int main(int argc, char* argv[])
     //
     // Time iteration
 
-    double dx                 = samurai::cell_length(mesh.max_level());
+    double dx                 = mesh.cell_length(mesh.max_level());
     double sum_max_velocities = 2;
     dt                        = cfl * dx / sum_max_velocities;
 
@@ -481,7 +483,9 @@ int main(int argc, char* argv[])
     }
 
     stokes_solver.destroy_petsc_objects();
+    samurai::times::timers.start("petsc finalize");
     PetscFinalize();
+    samurai::times::timers.stop("petsc finalize");
     samurai::finalize();
     return 0;
 }

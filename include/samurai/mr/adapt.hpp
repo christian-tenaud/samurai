@@ -5,9 +5,12 @@
 
 #include "../algorithm/graduation.hpp"
 #include "../algorithm/update.hpp"
+#include "../arguments.hpp"
+#include "../boundary.hpp"
 #include "../field.hpp"
 #include "../hdf5.hpp"
 #include "../static_algorithm.hpp"
+#include "../timers.hpp"
 #include "criteria.hpp"
 #include <type_traits>
 
@@ -77,7 +80,7 @@ namespace samurai
         {
             using fields_t = TField&;
             using mesh_t   = typename TField::mesh_t;
-            using detail_t = Field<mesh_t, typename TField::value_type, TField::size>;
+            using detail_t = Field<mesh_t, typename TField::value_type, TField::size, TField::is_soa>;
         };
     }
 
@@ -101,7 +104,7 @@ namespace samurai
         using tag_t             = Field<mesh_t, int, 1>;
 
         static constexpr std::size_t dim = mesh_t::dim;
-        static constexpr bool enlarge    = enlarge_;
+        static constexpr bool enlarge_v  = enlarge_;
 
         using interval_t    = typename mesh_t::interval_t;
         using coord_index_t = typename interval_t::coord_index_t;
@@ -115,17 +118,17 @@ namespace samurai
         tag_t m_tag;
     };
 
-    template <bool enlarge, class TField, class... TFields>
-    inline Adapt<enlarge, TField, TFields...>::Adapt(TField& field, TFields&... fields)
+    template <bool enlarge_, class TField, class... TFields>
+    inline Adapt<enlarge_, TField, TFields...>::Adapt(TField& field, TFields&... fields)
         : m_fields(field, fields...)
         , m_detail("detail", field.mesh())
         , m_tag("tag", field.mesh())
     {
     }
 
-    template <bool enlarge, class TField, class... TFields>
+    template <bool enlarge_, class TField, class... TFields>
     template <class... Fields>
-    void Adapt<enlarge, TField, TFields...>::operator()(double eps, double regularity, Fields&... other_fields)
+    void Adapt<enlarge_, TField, TFields...>::operator()(double eps, double regularity, Fields&... other_fields)
     {
         auto& mesh            = m_fields.mesh();
         std::size_t min_level = mesh.min_level();
@@ -137,6 +140,7 @@ namespace samurai
         }
         update_ghost_mr(m_fields);
 
+        times::timers.start("mesh adaptation");
         for (std::size_t i = 0; i < max_level - min_level; ++i)
         {
             // std::cout << "MR mesh adaptation " << i << std::endl;
@@ -149,6 +153,7 @@ namespace samurai
                 break;
             }
         }
+        times::timers.stop("mesh adaptation");
     }
 
     // TODO: to remove since it is used at several place
@@ -191,9 +196,40 @@ namespace samurai
         }
     }
 
-    template <bool enlarge, class TField, class... TFields>
+    template <class Mesh>
+    void keep_boundary_refined(const Mesh& mesh, Field<Mesh, int, 1>& tag, const DirectionVector<Mesh::dim>& direction)
+    {
+        // Since the adaptation process starts at max_level, we just need to flag to `keep` the boundary cells at max_level only.
+        // There will never be boundary cells at lower levels.
+        auto bdry = domain_boundary_layer(mesh, mesh.max_level(), direction, Mesh::config::max_stencil_width);
+        for_each_cell(mesh,
+                      bdry,
+                      [&](auto& cell)
+                      {
+                          tag[cell] = static_cast<int>(CellFlag::keep);
+                      });
+    }
+
+    template <class Mesh>
+    void keep_boundary_refined(const Mesh& mesh, Field<Mesh, int, 1>& tag)
+    {
+        constexpr std::size_t dim = Mesh::dim;
+
+        DirectionVector<dim> direction;
+        direction.fill(0);
+        for (std::size_t d = 0; d < dim; ++d)
+        {
+            direction(d) = 1;
+            keep_boundary_refined(mesh, tag, direction);
+            direction(d) = -1;
+            keep_boundary_refined(mesh, tag, direction);
+            direction(d) = 0;
+        }
+    }
+
+    template <bool enlarge_, class TField, class... TFields>
     template <class... Fields>
-    bool Adapt<enlarge, TField, TFields...>::harten(std::size_t ite, double eps, double regularity, Fields&... other_fields)
+    bool Adapt<enlarge_, TField, TFields...>::harten(std::size_t ite, double eps, double regularity, Fields&... other_fields)
     {
         auto& mesh = m_fields.mesh();
 
@@ -210,7 +246,10 @@ namespace samurai
         {
             update_tag_subdomains(level, m_tag, true);
         }
+
+        times::timers.stop("mesh adaptation");
         update_ghost_mr(m_fields);
+        times::timers.start("mesh adaptation");
 
         for (std::size_t level = ((min_level > 0) ? min_level - 1 : 0); level < max_level - ite; ++level)
         {
@@ -236,13 +275,18 @@ namespace samurai
             update_tag_subdomains(level, m_tag, true);
         }
 
+        if (args::refine_boundary) // cppcheck-suppress knownConditionTrueFalse
+        {
+            keep_boundary_refined(mesh, m_tag);
+        }
+
         for (std::size_t level = min_level; level <= max_level - ite; ++level)
         {
             auto subset_2 = intersection(mesh[mesh_id_t::cells][level], mesh[mesh_id_t::cells][level]);
 
             subset_2.apply_op(keep_around_refine(m_tag));
 
-            if constexpr (enlarge)
+            if constexpr (enlarge_v)
             {
                 auto subset_3 = intersection(mesh[mesh_id_t::cells_and_ghosts][level], mesh[mesh_id_t::cells_and_ghosts][level]);
                 subset_2.apply_op(enlarge(m_tag));
@@ -265,13 +309,16 @@ namespace samurai
             keep_subset.apply_op(maximum(m_tag));
 
             int grad_width = static_cast<int>(mesh_t::config::graduation_width);
-            auto stencil   = grad_width * detail::box_dir<dim>();
+            auto stencil   = detail::box_dir<dim>();
 
-            for (std::size_t is = 0; is < stencil.shape(0); ++is)
+            for (int ig = 1; ig <= grad_width; ++ig)
             {
-                auto s = xt::view(stencil, is);
-                auto subset = intersection(mesh[mesh_id_t::cells][level], translate(mesh[mesh_id_t::all_cells][level - 1], s)).on(level - 1);
-                subset.apply_op(balance_2to1(m_tag, s));
+                for (std::size_t is = 0; is < stencil.shape(0); ++is)
+                {
+                    auto s = ig * xt::view(stencil, is);
+                    auto subset = intersection(mesh[mesh_id_t::cells][level], translate(mesh[mesh_id_t::all_cells][level - 1], s)).on(level - 1);
+                    subset.apply_op(balance_2to1(m_tag, s));
+                }
             }
 
             update_tag_periodic(level, m_tag);
@@ -288,15 +335,17 @@ namespace samurai
             update_tag_subdomains<false>(level, m_tag);
 
             int grad_width = static_cast<int>(mesh_t::config::graduation_width);
-            auto stencil   = grad_width * detail::box_dir<dim>();
+            auto stencil   = detail::box_dir<dim>();
 
-            for (std::size_t is = 0; is < stencil.shape(0); ++is)
+            for (int ig = 1; ig <= grad_width; ++ig)
             {
-                auto s = xt::view(stencil, is);
-                auto subset = intersection(translate(mesh[mesh_id_t::cells][level], s), mesh[mesh_id_t::all_cells][level - 1], mesh.domain())
-                                  .on(level);
+                for (std::size_t is = 0; is < stencil.shape(0); ++is)
+                {
+                    auto s = ig * xt::view(stencil, is);
+                    auto subset = intersection(translate(mesh[mesh_id_t::cells][level], s), mesh[mesh_id_t::all_cells][level - 1]).on(level);
 
-                subset.apply_op(make_graduation(m_tag));
+                    subset.apply_op(make_graduation(m_tag));
+                }
             }
 
             update_tag_periodic(level, m_tag);
@@ -335,8 +384,10 @@ namespace samurai
             // update_tag_subdomains(level, m_tag);
             update_tag_subdomains<false>(level, m_tag);
         }
-
+        times::timers.stop("mesh adaptation");
         update_ghost_mr(other_fields...);
+        times::timers.start("mesh adaptation");
+
         keep_only_one_coarse_tag(m_tag);
 
         return update_field_mr(m_tag, m_fields, other_fields...);
@@ -348,9 +399,9 @@ namespace samurai
         return Adapt<false, TFields...>(fields...);
     }
 
-    template <bool enlarge, class... TFields>
+    template <bool enlarge_, class... TFields>
     auto make_MRAdapt(TFields&... fields)
     {
-        return Adapt<enlarge, TFields...>(fields...);
+        return Adapt<enlarge_, TFields...>(fields...);
     }
 } // namespace samurai

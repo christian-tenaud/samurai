@@ -1,6 +1,5 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <samurai/hdf5.hpp>
 #include <samurai/mr/adapt.hpp>
@@ -33,7 +32,7 @@ void save(const fs::path& path, const std::string& filename, const Field& u, con
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("Finite volume example for the heat equation", argc, argv);
 
     static constexpr std::size_t dim = 2;
     using Config                     = samurai::MRConfig<dim>;
@@ -57,8 +56,8 @@ int main(int argc, char* argv[])
     double cfl           = 0.95;
 
     // Multiresolution parameters
-    std::size_t min_level = 0;
-    std::size_t max_level = 3;
+    std::size_t min_level = 3;
+    std::size_t max_level = 6;
     double mr_epsilon     = 1e-4; // Threshold used by multiresolution
     double mr_regularity  = 1.;   // Regularity guess for multiresolution
 
@@ -67,7 +66,6 @@ int main(int argc, char* argv[])
     std::string filename       = "heat_heterog_" + std::to_string(dim) + "D";
     bool save_final_state_only = false;
 
-    CLI::App app{"Finite volume example for the heat equation in 2D"};
     app.add_flag("--explicit", explicit_scheme, "Explicit scheme instead of implicit")->group("Simulation parameters");
     app.add_option("--Tf", Tf, "Final time")->capture_default_str()->group("Simulation parameters");
     app.add_option("--dt", dt, "Time step")->capture_default_str()->group("Simulation parameters");
@@ -83,11 +81,11 @@ int main(int argc, char* argv[])
                    "adapt the mesh")
         ->capture_default_str()
         ->group("Multiresolution");
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
     app.add_flag("--save-final-state-only", save_final_state_only, "Save final state only")->group("Output");
     app.allow_extras();
-    CLI11_PARSE(app, argc, argv);
+    SAMURAI_PARSE(argc, argv);
 
     //------------------//
     // Petsc initialize //
@@ -160,7 +158,7 @@ int main(int argc, char* argv[])
     if (explicit_scheme)
     {
         double diff_coeff = 4;
-        double dx         = samurai::cell_length(max_level);
+        double dx         = mesh.cell_length(max_level);
         dt                = cfl * (dx * dx) / (pow(2, dim) * diff_coeff);
     }
 

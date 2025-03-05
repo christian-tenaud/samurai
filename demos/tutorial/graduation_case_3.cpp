@@ -1,6 +1,5 @@
 // Copyright 2018-2024 the samurai's authors
 // SPDX-License-Identifier:  BSD-3-Clause
-#include <CLI/CLI.hpp>
 
 #include <cmath>
 
@@ -30,7 +29,7 @@ auto generate_mesh(std::size_t start_level)
 
 int main(int argc, char* argv[])
 {
-    samurai::initialize(argc, argv);
+    auto& app = samurai::initialize("Graduation example: test case 3", argc, argv);
 
     constexpr std::size_t dim = 2; // cppcheck-suppress unreadVariable
     std::size_t start_level   = 1;
@@ -43,13 +42,12 @@ int main(int argc, char* argv[])
     fs::path path        = fs::current_path();
     std::string filename = "graduation_case_3";
 
-    CLI::App app{"Graduation example: test case 3"};
     app.add_option("--start-level", start_level, "where to start the mesh generator")->capture_default_str();
     app.add_option("--max-level", max_level, "Maximum level of the mesh generator")->capture_default_str();
     app.add_flag("--with-graduation", with_graduation, "Make the mesh graduated")->capture_default_str();
-    app.add_option("--path", path, "Output path")->capture_default_str()->group("Ouput");
-    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Ouput");
-    CLI11_PARSE(app, argc, argv);
+    app.add_option("--path", path, "Output path")->capture_default_str()->group("Output");
+    app.add_option("--filename", filename, "File name prefix")->capture_default_str()->group("Output");
+    SAMURAI_PARSE(argc, argv);
 
     if (!fs::exists(path))
     {
@@ -118,19 +116,29 @@ int main(int argc, char* argv[])
 
                             if (i_f.is_valid())
                             {
-                                auto mask                                       = tag(level, i_f - s[0], j_f - s[1]);
-                                auto i_c                                        = i_f >> 1;
-                                auto j_c                                        = j_f >> 1;
-                                xt::masked_view(tag(level - 1, i_c, j_c), mask) = true;
+                                auto mask = tag(level, i_f - s[0], j_f - s[1]);
+                                auto i_c  = i_f >> 1;
+                                auto j_c  = j_f >> 1;
+                                samurai::apply_on_masked(tag(level - 1, i_c, j_c),
+                                                         mask,
+                                                         [](auto& a)
+                                                         {
+                                                             a = true;
+                                                         });
                             }
 
                             i_f = interval.odd_elements();
                             if (i_f.is_valid())
                             {
-                                auto mask                                       = tag(level, i_f - s[0], j_f - s[1]);
-                                auto i_c                                        = i_f >> 1;
-                                auto j_c                                        = j_f >> 1;
-                                xt::masked_view(tag(level - 1, i_c, j_c), mask) = true;
+                                auto mask = tag(level, i_f - s[0], j_f - s[1]);
+                                auto i_c  = i_f >> 1;
+                                auto j_c  = j_f >> 1;
+                                samurai::apply_on_masked(tag(level - 1, i_c, j_c),
+                                                         mask,
+                                                         [](auto& a)
+                                                         {
+                                                             a = true;
+                                                         });
                             }
                         });
                 }
@@ -141,9 +149,10 @@ int main(int argc, char* argv[])
         samurai::for_each_interval(ca,
                                    [&](std::size_t level, const auto& interval, const auto& index)
                                    {
-                                       auto j    = index[0];
-                                       auto itag = interval.start + interval.index;
-                                       for (int i = interval.start; i < interval.end; ++i)
+                                       using size_type = typename decltype(tag)::size_type;
+                                       auto j          = index[0];
+                                       auto itag       = static_cast<size_type>(interval.start + interval.index);
+                                       for (auto i = interval.start; i < interval.end; ++i)
                                        {
                                            if (tag[itag] && level < max_level)
                                            {

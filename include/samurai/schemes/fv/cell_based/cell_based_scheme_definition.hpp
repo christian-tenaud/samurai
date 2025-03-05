@@ -55,7 +55,7 @@ namespace samurai
     struct CellBasedSchemeDefinitionBase
     {
         static constexpr std::size_t dim = cfg::input_field_t::dim;
-        using scheme_stencil_t           = Stencil<cfg::stencil_size, dim>;
+        using scheme_stencil_t           = StencilAnalyzer<cfg::stencil_size, dim>;
         scheme_stencil_t stencil;
 
         CellBasedSchemeDefinitionBase()
@@ -77,7 +77,7 @@ namespace samurai
     };
 
     template <class cfg>
-    using SchemeValue = CollapsArray<typename cfg::input_field_t::value_type, cfg::output_field_size>;
+    using SchemeValue = CollapsArray<typename cfg::input_field_t::value_type, cfg::output_field_size, cfg::input_field_t::is_soa>;
 
     /**
      * Specialization of @class CellBasedSchemeDefinition.

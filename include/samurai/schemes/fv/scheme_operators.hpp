@@ -26,6 +26,28 @@ namespace samurai
         }
     }
 
+    template <class... Operators>
+    constexpr std::size_t stencil_size_of_sum()
+    {
+        return std::max({Operators::cfg_t::stencil_size...});
+    }
+
+    template <class... Operators>
+    constexpr std::size_t get_largest_stencil_index()
+    {
+        std::size_t max = std::max({Operators::cfg_t::stencil_size...});
+        std::size_t i   = 0;
+        for (const auto& size : {Operators::cfg_t::stencil_size...})
+        {
+            if (size == max)
+            {
+                break;
+            }
+            i++;
+        }
+        return i;
+    }
+
     /**
      * @class OperatorSum:
      * Stores a list of operators that cannot be combined.
@@ -38,10 +60,11 @@ namespace samurai
     {
       private:
 
-        template <SchemeType scheme_type_, std::size_t output_field_size_>
+        template <SchemeType scheme_type_, std::size_t stencil_size_, std::size_t output_field_size_>
         struct Config
         {
             static constexpr SchemeType scheme_type        = scheme_type_;
+            static constexpr std::size_t stencil_size      = stencil_size_;
             static constexpr std::size_t output_field_size = output_field_size_;
         };
 
@@ -52,9 +75,13 @@ namespace samurai
         static constexpr std::size_t output_field_size = FirstOperatorType::cfg_t::output_field_size;
         using input_field_t                            = typename FirstOperatorType::input_field_t;
         using output_field_t                           = typename FirstOperatorType::output_field_t;
+        using size_type                                = typename FirstOperatorType::size_type;
         using field_t                                  = input_field_t;
 
-        using cfg_t = Config<scheme_type_of_sum<Operators...>(), output_field_size>;
+        using cfg_t = Config<scheme_type_of_sum<Operators...>(), stencil_size_of_sum<Operators...>(), output_field_size>;
+
+        // cppcheck-suppress unusedStructMember
+        static constexpr std::size_t largest_stencil_index = get_largest_stencil_index<Operators...>();
 
       private:
 
@@ -103,16 +130,22 @@ namespace samurai
             return ss.str();
         }
 
-        auto operator()(input_field_t& input_field) const
+        auto operator()(input_field_t& input_field)
         {
             auto explicit_scheme = make_explicit(*this);
             return explicit_scheme.apply_to(input_field);
         }
 
-        void apply(output_field_t& output_field, input_field_t& input_field) const
+        auto operator()(std::size_t d, input_field_t& input_field)
         {
             auto explicit_scheme = make_explicit(*this);
-            return explicit_scheme.apply(output_field, input_field);
+            return explicit_scheme.apply_to(d, input_field);
+        }
+
+        void apply(output_field_t& output_field, input_field_t& input_field)
+        {
+            auto explicit_scheme = make_explicit(*this);
+            explicit_scheme.apply(output_field, input_field);
         }
     };
 
